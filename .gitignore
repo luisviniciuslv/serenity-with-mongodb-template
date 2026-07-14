@@ -1,2 +1,10 @@
 /target
 .env
+
+# Ignora tudo dentro de target, mas permite entrar nas subpastas
+/target/*
+!/target/release/
+
+# Ignora tudo dentro de release, exceto o executável 
+/target/release/*
+!/target/release/cassino_dc
