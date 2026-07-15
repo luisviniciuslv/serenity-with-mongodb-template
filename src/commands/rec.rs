@@ -13,10 +13,7 @@ pub async fn rec(ctx: Context<'_>) -> Result<(), Error> {
     let now = get_current_timestamp();
     let elapsed_seconds = (now - user_db.last_reward).max(0);
     let missing_seconds = get_reward_interval_seconds() - (elapsed_seconds % get_reward_interval_seconds());
-    let (_, reward_amount, was_capped) = {
-        let (updated_user, reward_amount, was_capped) = collect_reward(&user.id.to_string()).await?;
-        (updated_user, reward_amount, was_capped)
-    };
+    let (updated_user, reward_amount, was_capped) = collect_reward(&user.id.to_string()).await?;
 
     let message = if reward_amount > 0 {
         if was_capped {
@@ -25,7 +22,7 @@ pub async fn rec(ctx: Context<'_>) -> Result<(), Error> {
                 rec_cap
             )
         } else {
-            format!("Você recebeu {reward_amount} coin(s)! Agora você tem {} coin(s).", user_db.coins + reward_amount)
+            format!("Você recebeu {reward_amount} coin(s)! Agora você tem {} coin(s).", updated_user.coins)
         }
     } else {
         format!("Ainda não acumulou reward. Espere mais {missing_seconds} segundo(s).")

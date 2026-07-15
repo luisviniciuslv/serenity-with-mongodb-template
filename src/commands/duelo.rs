@@ -103,15 +103,21 @@ pub async fn duelo(
     update_coins(&desafiante.id.to_string(), -aposta).await?;
     update_coins(&alvo.id.to_string(), -aposta).await?;
     update_coins(&winner.id.to_string(), aposta * 2).await?;
+    let desafiante_final = get_user(&desafiante.id.to_string()).await?;
+    let alvo_final = get_user(&alvo.id.to_string()).await?;
+    let vencedor_final = get_user(&winner.id.to_string()).await?;
 
     message
         .reply(
             ctx.serenity_context(),
             format!(
-                "Duelo iniciado!\nVencedor: {}\nPerdedor: {}\nPrêmio: {} coin(s)",
+                "Duelo iniciado!\nVencedor: {}\nPerdedor: {}\nPrêmio: {} coin(s)\nSaldo final do vencedor: {} coin(s)\nSaldo final do desafiante: {} coin(s)\nSaldo final do alvo: {} coin(s)",
                 winner.mention(),
                 loser.mention(),
-                aposta * 2
+                aposta * 2,
+                vencedor_final.coins,
+                desafiante_final.coins,
+                alvo_final.coins
             ),
         )
         .await?;

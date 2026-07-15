@@ -26,7 +26,7 @@ pub async fn niquel(
         return Ok(());
     }
 
-    let _ = update_coins(&user.id.to_string(), -aposta).await?;
+    let saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?;
 
     let mut slots = vec!["?".to_string(), "?".to_string(), "?".to_string()];
 
@@ -56,14 +56,16 @@ pub async fn niquel(
     let multiplier = calculate_multiplier(&slots);
     let payout = (aposta as f64 * multiplier).floor() as i64;
 
-    if payout > 0 {
-        let _ = update_coins(&user.id.to_string(), payout).await?;
-    }
+    let saldo_final = if payout > 0 {
+        update_coins(&user.id.to_string(), payout).await?.coins
+    } else {
+        saldo_apos_aposta.coins
+    };
 
     message
         .edit(
             ctx.serenity_context(),
-            EditMessage::new().embed(build_result_embed(&slots, aposta, multiplier, payout)),
+            EditMessage::new().embed(build_result_embed(&slots, aposta, multiplier, payout, saldo_final)),
         )
         .await?;
 
@@ -88,7 +90,13 @@ fn build_spinning_embed(slots: &[String], aposta: i64, revealed_count: usize) ->
         )
 }
 
-fn build_result_embed(slots: &[String], aposta: i64, multiplier: f64, payout: i64) -> CreateEmbed {
+fn build_result_embed(
+    slots: &[String],
+    aposta: i64,
+    multiplier: f64,
+    payout: i64,
+    saldo_final: i64,
+) -> CreateEmbed {
     let won = payout > 0;
     let status_text = if won {
         format!("Você ganhou {} coin(s)!", payout)
@@ -106,6 +114,7 @@ fn build_result_embed(slots: &[String], aposta: i64, multiplier: f64, payout: i6
         .field("Aposta", aposta.to_string(), true)
         .field("Multiplicador", format!("{:.2}x", multiplier), true)
         .field("Pagamento", payout.to_string(), true)
+        .field("Saldo atual", saldo_final.to_string(), true)
         .field("Status", status_text, false)
 }
 

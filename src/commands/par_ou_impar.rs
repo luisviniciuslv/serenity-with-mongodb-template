@@ -56,11 +56,11 @@ async fn run_bet_command(
         };
 
         if ganhou {
-            let _ = update_coins(&user.id.to_string(), aposta).await?;
-            format!("Número gerado: {numero}\nVocê ganhou {aposta} coins")
+            let updated_user = update_coins(&user.id.to_string(), aposta).await?;
+            format!("Número gerado: {numero}\nVocê ganhou {aposta} coins\nSaldo atual: {} coins", updated_user.coins)
         } else {
-            let _ = update_coins(&user.id.to_string(), -aposta).await?;
-            format!("Número gerado: {numero}\nVocê perdeu {aposta} coins")
+            let updated_user = update_coins(&user.id.to_string(), -aposta).await?;
+            format!("Número gerado: {numero}\nVocê perdeu {aposta} coins\nSaldo atual: {} coins", updated_user.coins)
         }
     };
 

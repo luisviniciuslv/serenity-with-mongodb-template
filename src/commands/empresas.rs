@@ -165,8 +165,8 @@ async fn buy_or_upgrade_business(user_id: &str, current_index: usize) -> Result<
         update_user(&user).await?;
 
         Ok(format!(
-            "{} upada para level {} por {} coins.",
-            catalog.name, new_level, upgrade_price
+            "{} upada para level {} por {} coins. Saldo atual: {} coins.",
+            catalog.name, new_level, upgrade_price, user.coins
         ))
     } else {
         if user.coins < catalog.price {
@@ -186,8 +186,8 @@ async fn buy_or_upgrade_business(user_id: &str, current_index: usize) -> Result<
         update_user(&user).await?;
 
         Ok(format!(
-            "{} comprada por {} coins.",
-            catalog.name, catalog.price
+            "{} comprada por {} coins. Saldo atual: {} coins.",
+            catalog.name, catalog.price, user.coins
         ))
     }
 }

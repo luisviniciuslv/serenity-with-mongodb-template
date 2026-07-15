@@ -38,7 +38,7 @@ pub async fn highlow(
 
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_waiting_embed(current_card, aposta, streak)],
+            embeds: vec![build_waiting_embed(current_card, aposta, streak, user_db.coins)],
             components: Some(default_components()),
             ..Default::default()
         })
@@ -62,17 +62,23 @@ pub async fn highlow(
 
         if custom_id == BTN_CASHOUT {
             let bonus = cashout_bonus(aposta, streak);
-            if bonus > 0 {
-                update_coins(&user.id.to_string(), bonus).await?;
-            }
+            let updated_user = if bonus > 0 {
+                Some(update_coins(&user.id.to_string(), bonus).await?)
+            } else {
+                None
+            };
             set_highlow_streak(&user.id.to_string(), 0).await?;
+            let saldo_atual = updated_user
+                .as_ref()
+                .map(|user| user.coins)
+                .unwrap_or(user_db.coins);
 
             interaction
                 .create_response(
                     ctx.serenity_context(),
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
-                            .embed(build_cashout_embed(current_card, aposta, streak, bonus))
+                            .embed(build_cashout_embed(current_card, aposta, streak, bonus, saldo_atual))
                             .components(vec![]),
                     ),
                 )
@@ -105,6 +111,7 @@ pub async fn highlow(
         }
 
         update_coins(&user.id.to_string(), -aposta).await?;
+        let saldo_apos_aposta = get_user(&user.id.to_string()).await?.coins;
 
         let next_card = draw_card(&mut deck);
         let won = if custom_id == BTN_HIGH {
@@ -121,7 +128,7 @@ pub async fn highlow(
 
             let multiplier = streak_multiplier(streak);
             let payout = ((aposta as f64) * multiplier).floor() as i64;
-            update_coins(&user.id.to_string(), payout).await?;
+            let updated_user = update_coins(&user.id.to_string(), payout).await?;
 
             let previous_card = current_card;
             current_card = next_card;
@@ -131,7 +138,7 @@ pub async fn highlow(
                     ctx.serenity_context(),
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
-                            .embed(build_win_embed(previous_card, next_card, aposta, streak, multiplier, payout))
+                            .embed(build_win_embed(previous_card, next_card, aposta, streak, multiplier, payout, updated_user.coins))
                             .components(default_components()),
                     ),
                 )
@@ -144,7 +151,7 @@ pub async fn highlow(
                     ctx.serenity_context(),
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
-                            .embed(build_loss_embed(current_card, next_card, aposta, tie))
+                            .embed(build_loss_embed(current_card, next_card, aposta, tie, saldo_apos_aposta))
                             .components(vec![]),
                     ),
                 )
@@ -194,15 +201,16 @@ fn default_components() -> Vec<CreateActionRow> {
     ])]
 }
 
-fn build_waiting_embed(current_card: Card, aposta: i64, streak: i64) -> CreateEmbed {
+fn build_waiting_embed(current_card: Card, aposta: i64, streak: i64, saldo_atual: i64) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
         .color(Colour::DARK_BLUE)
         .description(format!(
-            "Carta atual:\n{}\n\nAposta por rodada: **{}**\nStreak atual: **{}**\nBônus de saque agora: **{}** coin(s)\n\nClique em **Maior** se acha que a próxima carta será maior.\nClique em **Menor** se acha que a próxima carta será menor.",
+            "Carta atual:\n{}\n\nAposta por rodada: **{}**\nStreak atual: **{}**\nSaldo atual: **{}** coin(s)\nBônus de saque agora: **{}** coin(s)\n\nClique em **Maior** se acha que a próxima carta será maior.\nClique em **Menor** se acha que a próxima carta será menor.",
             card_text(current_card),
             aposta,
             streak,
+            saldo_atual,
             cashout_bonus(aposta, streak)
         ))
 }
@@ -214,24 +222,26 @@ fn build_win_embed(
     streak: i64,
     multiplier: f64,
     payout: i64,
+    saldo_atual: i64,
 ) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Acertou")
         .color(Colour::DARK_GREEN)
         .description(format!(
-            "Carta anterior:\n{}\nNova carta:\n{}\n\nVocê venceu esta rodada!\nAposta: **{}**\nMultiplicador da streak: **{:.2}x**\nPagamento: **{}**",
+            "Carta anterior:\n{}\nNova carta:\n{}\n\nVocê venceu esta rodada!\nAposta: **{}**\nMultiplicador da streak: **{:.2}x**\nPagamento: **{}**\nSaldo atual: **{}** coin(s)",
             card_text(previous_card),
             card_text(revealed_card),
             aposta,
             multiplier,
-            payout
+            payout,
+            saldo_atual
         ))
         .field("Streak", streak.to_string(), true)
         .field("Saque agora", cashout_bonus(aposta, streak).to_string(), true)
         .field("Próxima jogada", "Escolha Maior ou Menor novamente.", true)
 }
 
-fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, tie: bool) -> CreateEmbed {
+fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, tie: bool, saldo_atual: i64) -> CreateEmbed {
     let reason = if tie {
         "Empate conta como derrota."
     } else {
@@ -242,24 +252,26 @@ fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, tie: 
         .title("HighLow • Fim de jogo")
         .color(Colour::DARK_RED)
         .description(format!(
-            "Carta anterior:\n{}\nNova carta:\n{}\n\n{}\nPerda desta rodada: **{}**\nStreak resetada para **0**.",
+            "Carta anterior:\n{}\nNova carta:\n{}\n\n{}\nPerda desta rodada: **{}**\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
             card_text(previous_card),
             card_text(revealed_card),
             reason,
-            aposta
+            aposta,
+            saldo_atual
         ))
 }
 
-fn build_cashout_embed(current_card: Card, aposta: i64, streak: i64, bonus: i64) -> CreateEmbed {
+fn build_cashout_embed(current_card: Card, aposta: i64, streak: i64, bonus: i64, saldo_atual: i64) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Saque realizado")
         .color(Colour::DARK_GREY)
         .description(format!(
-            "Você sacou e encerrou a sessão.\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak no saque: **{}**\nBônus recebido: **{}** coin(s)\nStreak resetada para **0**.",
+            "Você sacou e encerrou a sessão.\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak no saque: **{}**\nBônus recebido: **{}** coin(s)\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
             card_text(current_card),
             aposta,
             streak,
-            bonus
+            bonus,
+            saldo_atual
         ))
 }
 
@@ -352,7 +364,16 @@ fn card_text(card: Card) -> String {
 }
 
 fn streak_multiplier(streak: i64) -> f64 {
-    (1.90 + ((streak - 1).max(0) as f64 * 0.20)).min(3.50)
+    if streak <= 0 {
+        return 1.20;
+    }
+
+    let start = 1.20;
+    let end = 8.00;
+    let max_streak = 13.0;
+    let step = (end - start) / (max_streak - 1.0);
+
+    (start + ((streak - 1) as f64 * step)).min(end)
 }
 
 fn cashout_bonus(aposta: i64, streak: i64) -> i64 {
