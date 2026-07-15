@@ -34,7 +34,7 @@ fn embed_geral() -> CreateEmbed {
         .color(Colour::GOLD)
         .description(
             "Bem-vindo ao cassino! Aqui você encontra todos os jogos disponíveis.\n\
-             Use `!help <jogo>` para ver as regras detalhadas de cada um.\n\u200b",
+             Use `!help <jogo>` para ver as regras detalhadas de cada um.\n\u{200b}",
         )
         .field(
             "🎰 Caça-Níquel  →  `!niquel <aposta>`",
@@ -77,7 +77,7 @@ fn embed_niquel() -> CreateEmbed {
             "**Comando:** `!niquel <aposta>` ou `/niquel <aposta>`\n\
              A `<aposta>` é o valor **total** que você arrisca na rodada.\n\
              Internamente ela é dividida em **20 linhas de pagamento** — \
-             você nunca perde mais do que digitou.\n\u200b",
+             você nunca perde mais do que digitou.\n\u{200b}",
         )
         .field(
             "📐 Como funciona",
@@ -141,7 +141,7 @@ fn embed_highlow() -> CreateEmbed {
         .color(Colour::DARK_BLUE)
         .description(
             "**Comando:** `!highlow <aposta>` ou `/highlow <aposta>`\n\
-             Jogo de cartas: adivinhe se a próxima carta é maior ou menor.\n\u200b",
+             Jogo de cartas: adivinhe se a próxima carta é maior ou menor.\n\u{200b}",
         )
         .field(
             "📐 Como funciona",
@@ -200,7 +200,7 @@ fn embed_poi() -> CreateEmbed {
         .color(Colour::DARK_GREEN)
         .description(
             "**Comando:** `!poi <par|impar> <aposta>` ou `/poi <par|impar> <aposta>`\n\
-             O jogo mais simples do cassino — aposte e torça!\n\u200b",
+             O jogo mais simples do cassino — aposte e torça!\n\u{200b}",
         )
         .field(
             "📐 Como funciona",
