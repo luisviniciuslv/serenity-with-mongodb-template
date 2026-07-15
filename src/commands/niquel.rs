@@ -211,13 +211,14 @@ fn free_spins_from_scatter(count: usize) -> u32 {
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
 pub async fn niquel(
     ctx: Context<'_>,
-    #[description = "Valor da aposta por linha (x20 linhas no total)"] aposta: String,
+    #[description = "Valor TOTAL da aposta (dividido em 20 linhas automaticamente)"] aposta: String,
 ) -> Result<(), Error> {
     let user = ctx.author().clone();
     let user_db = get_user(&user.id.to_string()).await?;
 
-    let aposta = if aposta.to_lowercase() == "allwin" {
-        user_db.coins / NUM_PAYLINES
+    // aposta_total = o que o usuário digita; nunca perde mais do que isso
+    let aposta_total = if aposta.to_lowercase() == "allwin" {
+        user_db.coins
     } else {
         match aposta.parse::<i64>() {
             Ok(val) => val,
@@ -229,17 +230,19 @@ pub async fn niquel(
         }
     };
 
-    if aposta <= 0 {
+    if aposta_total <= 0 {
         ctx.say("Valor de aposta inválido.").await?;
         return Ok(());
     }
 
-    let total_aposta = NUM_PAYLINES * aposta;
+    // Divide internamente em 20 linhas; trunca para múltiplo exato
+    let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
+    let total_aposta = aposta_por_linha * NUM_PAYLINES;
 
     if user_db.coins < total_aposta {
         ctx.say(format!(
-            "Você não tem coins suficientes. Aposta total: **{}** coins ({} linhas × {}).",
-            total_aposta, NUM_PAYLINES, aposta
+            "Você não tem coins suficientes. Aposta total: **{}** coins.",
+            total_aposta
         ))
         .await?;
         return Ok(());
@@ -250,19 +253,20 @@ pub async fn niquel(
     // Deduz aposta e gira
     update_coins(&user.id.to_string(), -total_aposta).await?;
     let grid = spin_grid();
-    let result = evaluate_spin(&grid, aposta);
+    let result = evaluate_spin(&grid, aposta_por_linha);
     let saldo_final = if result.payout > 0 {
         update_coins(&user.id.to_string(), result.payout).await?.coins
     } else {
         get_user(&user.id.to_string()).await?.coins
     };
 
+    let aposta = aposta_por_linha; // alias para o restante do código
+
     // Animação de giro (mostra "?" e revela coluna por coluna)
     let reply = ctx
         .send(CreateReply {
             embeds: vec![build_spinning_embed(
                 &vec![vec!["?".to_string(); 5]; 3],
-                aposta,
                 total_aposta,
                 0,
                 &user.name,
@@ -291,7 +295,6 @@ pub async fn niquel(
                 ctx.serenity_context(),
                 EditMessage::new().embed(build_spinning_embed(
                     &partial,
-                    aposta,
                     total_aposta,
                     col + 1,
                     &user.name,
@@ -536,7 +539,6 @@ async fn run_free_spins(
 // ─── Embeds ───────────────────────────────────────────────────────────────────
 fn build_spinning_embed(
     grid: &[Vec<String>],
-    aposta: i64,
     total_aposta: i64,
     revealed_count: usize,
     user_name: &str,
@@ -548,8 +550,7 @@ fn build_spinning_embed(
         .color(Colour::DARK_GOLD)
         .description(render_grid(grid))
         .field("Linhas Ativas", NUM_PAYLINES.to_string(), true)
-        .field("Aposta por linha", format!("{} coins", aposta), true)
-        .field("Aposta total", format!("{} coins", total_aposta), true)
+        .field("Aposta Total", format!("{} coins", total_aposta), true)
         .field("Colunas reveladas", format!("{}/5", revealed_count), true)
         .field("Status", "🎲 Girando...", true)
         .field(
