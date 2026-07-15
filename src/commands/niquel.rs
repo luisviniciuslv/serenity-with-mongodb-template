@@ -49,6 +49,7 @@ pub async fn niquel(
         .await?;
 
     let mut message = reply.message().await?.into_owned();
+    let mut animation_edit_failed = false;
 
     // Revela por coluna para todas as linhas: 1a, 2a e 3a.
     for col in 0..3 {
@@ -59,20 +60,26 @@ pub async fn niquel(
             row[col] = symbol.to_string();
         }
 
-        let _ = message
-            .edit(
-                ctx.serenity_context(),
-                EditMessage::new().embed(build_spinning_embed(
-                    &slots,
-                    linhas,
-                    aposta,
-                    total_aposta,
-                    col + 1,
-                    &user.name,
-                    &user_image_url,
-                )),
-            )
-            .await;
+        if !animation_edit_failed {
+            if message
+                .edit(
+                    ctx.serenity_context(),
+                    EditMessage::new().embed(build_spinning_embed(
+                        &slots,
+                        linhas,
+                        aposta,
+                        total_aposta,
+                        col + 1,
+                        &user.name,
+                        &user_image_url,
+                    )),
+                )
+                .await
+                .is_err()
+            {
+                animation_edit_failed = true;
+            }
+        }
     }
 
     let line_multipliers: Vec<f64> = slots
@@ -101,13 +108,14 @@ pub async fn niquel(
         saldo_final,
     );
 
-    if message
-        .edit(
-            ctx.serenity_context(),
-            EditMessage::new().embed(result_embed.clone()),
-        )
-        .await
-        .is_err()
+    if animation_edit_failed
+        || message
+            .edit(
+                ctx.serenity_context(),
+                EditMessage::new().embed(result_embed.clone()),
+            )
+            .await
+            .is_err()
     {
         ctx.send(CreateReply {
             embeds: vec![result_embed],
