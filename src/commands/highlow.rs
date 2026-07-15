@@ -21,20 +21,21 @@ pub async fn highlow(
     #[description = "Valor da aposta por rodada"] aposta: i64,
 ) -> Result<(), Error> {
     let user = ctx.author().clone();
+    let user_id = user.id.to_string();
 
     if aposta <= 0 {
         ctx.say("Aposta inválida.").await?;
         return Ok(());
     }
 
-    let user_db = get_user(&user.id.to_string()).await?;
+    let user_db = get_user(&user_id).await?;
     if user_db.coins < aposta {
         ctx.say("Você não tem coins suficientes para essa aposta.").await?;
         return Ok(());
     }
 
     // The first round is paid as soon as the command starts.
-    let saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
+    let saldo_apos_aposta = update_coins(&user_id, -aposta).await?.coins;
     let mut first_round_pending = true;
 
     let mut deck = shuffled_deck();
@@ -63,131 +64,76 @@ pub async fn highlow(
             break;
         };
 
-        let custom_id = interaction.data.custom_id.as_str();
+        let action_id = interaction.data.custom_id.as_str();
 
-        if custom_id == BTN_CASHOUT {
-            let bonus = cashout_bonus(aposta, streak);
-            let updated_user = if bonus > 0 {
-                Some(update_coins(&user.id.to_string(), bonus).await?)
-            } else {
-                None
-            };
-            set_highlow_streak(&user.id.to_string(), 0).await?;
-            let saldo_atual = updated_user
-                .as_ref()
-                .map(|user| user.coins)
-                .unwrap_or(get_user(&user.id.to_string()).await?.coins);
-
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    CreateInteractionResponse::UpdateMessage(
-                        CreateInteractionResponseMessage::new()
-                            .embed(build_cashout_embed(current_card, aposta, streak, bonus, saldo_atual))
-                            .components(vec![]),
-                    ),
-                )
-                .await?;
+        if action_id == BTN_CASHOUT {
+            process_cashout(
+                &ctx,
+                &interaction,
+            &user_id,
+                current_card,
+                aposta,
+                streak,
+            )
+            .await?;
             break;
         }
 
-        if custom_id != BTN_HIGH && custom_id != BTN_LOW {
+        if action_id != BTN_HIGH && action_id != BTN_LOW {
             continue;
         }
 
-        if first_round_pending {
-            first_round_pending = false;
-        } else {
-            let fresh_user = get_user(&user.id.to_string()).await?;
-            if fresh_user.coins < aposta {
-                interaction
-                    .create_response(
-                        ctx.serenity_context(),
-                        CreateInteractionResponse::UpdateMessage(
-                            CreateInteractionResponseMessage::new()
-                                .embed(build_error_embed(
-                                    current_card,
-                                    aposta,
-                                    streak,
-                                    "Saldo insuficiente para continuar o highlow.",
-                                ))
-                                .components(vec![]),
-                        ),
-                    )
-                    .await?;
-                break;
-            }
-
-            update_coins(&user.id.to_string(), -aposta).await?;
+        if !pay_round_if_needed(
+            &ctx,
+            &interaction,
+            &user_id,
+            current_card,
+            aposta,
+            streak,
+            &mut first_round_pending,
+        )
+        .await?
+        {
+            break;
         }
 
         let Some(next_card) = draw_card(&mut deck) else {
-            let bonus = cashout_bonus(aposta, streak);
-            let updated_user = if bonus > 0 {
-                Some(update_coins(&user.id.to_string(), bonus).await?)
-            } else {
-                None
-            };
-            set_highlow_streak(&user.id.to_string(), 0).await?;
-            let saldo_atual = updated_user
-                .as_ref()
-                .map(|user| user.coins)
-                .unwrap_or(get_user(&user.id.to_string()).await?.coins);
-
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    CreateInteractionResponse::UpdateMessage(
-                        CreateInteractionResponseMessage::new()
-                            .embed(build_deck_exhausted_embed(current_card, aposta, streak, bonus, saldo_atual))
-                            .components(vec![]),
-                    ),
-                )
-                .await?;
+            process_deck_exhausted(
+                &ctx,
+                &interaction,
+                &user_id,
+                current_card,
+                aposta,
+                streak,
+            )
+            .await?;
             break;
         };
-        let comparison = compare_cards(next_card, current_card);
-        let won = if custom_id == BTN_HIGH {
-            comparison == Ordering::Greater
-        } else {
-            comparison == Ordering::Less
-        };
+        let did_win = is_winning_guess(action_id, current_card, next_card);
 
-        if won {
-            streak += 1;
-            set_highlow_streak(&user.id.to_string(), streak).await?;
-
-            let multiplier = streak_multiplier(streak);
-            let payout = ((aposta as f64) * multiplier).floor() as i64;
-            let updated_user = update_coins(&user.id.to_string(), payout).await?;
-
+        if did_win {
             let previous_card = current_card;
             current_card = next_card;
-
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    CreateInteractionResponse::UpdateMessage(
-                        CreateInteractionResponseMessage::new()
-                            .embed(build_win_embed(previous_card, next_card, aposta, streak, multiplier, payout, updated_user.coins))
-                            .components(default_components()),
-                    ),
-                )
-                .await?;
+            streak = process_round_win(
+                &ctx,
+                &interaction,
+            &user_id,
+                previous_card,
+                next_card,
+                aposta,
+                streak,
+            )
+            .await?;
         } else {
-            set_highlow_streak(&user.id.to_string(), 0).await?;
-            let updated_user = get_user(&user.id.to_string()).await?;
-
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    CreateInteractionResponse::UpdateMessage(
-                        CreateInteractionResponseMessage::new()
-                            .embed(build_loss_embed(current_card, next_card, aposta, updated_user.coins))
-                            .components(vec![]),
-                    ),
-                )
-                .await?;
+            process_round_loss(
+                &ctx,
+                &interaction,
+                &user_id,
+                current_card,
+                next_card,
+                aposta,
+            )
+            .await?;
             break;
         }
     }
@@ -217,6 +163,187 @@ async fn interaction_timeout_update(
         .await?;
 
     Ok(())
+}
+
+async fn process_cashout(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    user_id: &str,
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+) -> Result<(), Error> {
+    let (bonus, saldo_atual) = settle_streak_reset(user_id, aposta, streak).await?;
+
+    respond_with_embed(
+        ctx,
+        interaction,
+        build_cashout_embed(current_card, aposta, streak, bonus, saldo_atual),
+        vec![],
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn pay_round_if_needed(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    user_id: &str,
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+    first_round_pending: &mut bool,
+) -> Result<bool, Error> {
+    if *first_round_pending {
+        *first_round_pending = false;
+        return Ok(true);
+    }
+
+    let fresh_user = get_user(user_id).await?;
+    if fresh_user.coins < aposta {
+        respond_with_embed(
+            ctx,
+            interaction,
+            build_error_embed(
+                current_card,
+                aposta,
+                streak,
+                "Saldo insuficiente para continuar o highlow.",
+            ),
+            vec![],
+        )
+        .await?;
+        return Ok(false);
+    }
+
+    update_coins(user_id, -aposta).await?;
+    Ok(true)
+}
+
+async fn process_deck_exhausted(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    user_id: &str,
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+) -> Result<(), Error> {
+    let (bonus, saldo_atual) = settle_streak_reset(user_id, aposta, streak).await?;
+
+    respond_with_embed(
+        ctx,
+        interaction,
+        build_deck_exhausted_embed(current_card, aposta, streak, bonus, saldo_atual),
+        vec![],
+    )
+    .await?;
+
+    Ok(())
+}
+
+fn is_winning_guess(custom_id: &str, current_card: Card, next_card: Card) -> bool {
+    let comparison = compare_cards(next_card, current_card);
+    if custom_id == BTN_HIGH {
+        comparison == Ordering::Greater
+    } else {
+        comparison == Ordering::Less
+    }
+}
+
+async fn process_round_win(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    user_id: &str,
+    previous_card: Card,
+    next_card: Card,
+    aposta: i64,
+    streak: i64,
+) -> Result<i64, Error> {
+    let next_streak = streak + 1;
+    set_highlow_streak(user_id, next_streak).await?;
+
+    let multiplier = streak_multiplier(next_streak);
+    let payout = ((aposta as f64) * multiplier).floor() as i64;
+    let updated_user = update_coins(user_id, payout).await?;
+
+    respond_with_embed(
+        ctx,
+        interaction,
+        build_win_embed(
+            previous_card,
+            next_card,
+            aposta,
+            next_streak,
+            multiplier,
+            payout,
+            updated_user.coins,
+        ),
+        default_components(),
+    )
+    .await?;
+
+    Ok(next_streak)
+}
+
+async fn process_round_loss(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    user_id: &str,
+    current_card: Card,
+    next_card: Card,
+    aposta: i64,
+) -> Result<(), Error> {
+    set_highlow_streak(user_id, 0).await?;
+    let updated_user = get_user(user_id).await?;
+
+    respond_with_embed(
+        ctx,
+        interaction,
+        build_loss_embed(current_card, next_card, aposta, updated_user.coins),
+        vec![],
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn respond_with_embed(
+    ctx: &Context<'_>,
+    interaction: &poise::serenity_prelude::ComponentInteraction,
+    embed: CreateEmbed,
+    components: Vec<CreateActionRow>,
+) -> Result<(), Error> {
+    interaction
+        .create_response(
+            ctx.serenity_context(),
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(components),
+            ),
+        )
+        .await?;
+
+    Ok(())
+}
+
+async fn settle_streak_reset(user_id: &str, aposta: i64, streak: i64) -> Result<(i64, i64), Error> {
+    let bonus = cashout_bonus(aposta, streak);
+    let updated_user = if bonus > 0 {
+        Some(update_coins(user_id, bonus).await?)
+    } else {
+        None
+    };
+
+    set_highlow_streak(user_id, 0).await?;
+
+    let saldo_atual = updated_user
+        .as_ref()
+        .map(|user| user.coins)
+        .unwrap_or(get_user(user_id).await?.coins);
+
+    Ok((bonus, saldo_atual))
 }
 
 fn default_components() -> Vec<CreateActionRow> {
