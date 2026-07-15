@@ -8,20 +8,32 @@ use crate::{Context, Error};
 
 const SYMBOLS: [&str; 8] = ["🍒", "🍋", "🍊", "🍉", "🐒", "💰", "💎", "🃏"];
 
-// As 10 Linhas de Pagamento (Paylines).
-// Representam a linha (0, 1 ou 2) que será verificada em cada uma das 5 colunas.
-const PAYLINES: [[usize; 5]; 10] = [
-    [1, 1, 1, 1, 1], // L1: Meio
-    [0, 0, 0, 0, 0], // L2: Topo
-    [2, 2, 2, 2, 2], // L3: Base
-    [0, 1, 2, 1, 0], // L4: V
-    [2, 1, 0, 1, 2], // L5: V invertido
-    [0, 0, 1, 2, 2], // L6: Escada descendo
-    [2, 2, 1, 0, 0], // L7: Escada subindo
-    [1, 2, 1, 0, 1], // L8: Zig-zag base
-    [1, 0, 1, 2, 1], // L9: Zig-zag topo
+// 20 Linhas de Pagamento sempre ativas — padrão real de video slots modernos 5x3.
+// Cada entrada representa a linha (0=topo, 1=meio, 2=base) em cada uma das 5 colunas.
+const PAYLINES: [[usize; 5]; 20] = [
+    [1, 1, 1, 1, 1], // L1:  Meio
+    [0, 0, 0, 0, 0], // L2:  Topo
+    [2, 2, 2, 2, 2], // L3:  Base
+    [0, 1, 2, 1, 0], // L4:  V
+    [2, 1, 0, 1, 2], // L5:  V invertido
+    [0, 0, 1, 2, 2], // L6:  Escada descendo
+    [2, 2, 1, 0, 0], // L7:  Escada subindo
+    [1, 2, 2, 2, 1], // L8:  Arco base
+    [1, 0, 0, 0, 1], // L9:  Arco topo
     [0, 1, 1, 1, 0], // L10: U invertido
+    [2, 1, 1, 1, 2], // L11: U normal
+    [0, 0, 0, 1, 2], // L12: Diagonal descendo direita
+    [2, 2, 2, 1, 0], // L13: Diagonal subindo direita
+    [0, 1, 0, 1, 0], // L14: Zig-zag topo longo
+    [2, 1, 2, 1, 2], // L15: Zig-zag base longo
+    [1, 2, 1, 0, 1], // L16: Zig-zag base curto
+    [1, 0, 1, 2, 1], // L17: Zig-zag topo curto
+    [0, 1, 2, 2, 2], // L18: L direita base
+    [2, 1, 0, 0, 0], // L19: L direita topo
+    [1, 1, 0, 1, 1], // L20: Dente de serra
 ];
+
+const NUM_PAYLINES: i64 = PAYLINES.len() as i64;
 
 struct LineResult {
     multiplier: f64,
@@ -33,19 +45,13 @@ struct LineResult {
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
 pub async fn niquel(
     ctx: Context<'_>,
-    #[description = "Quantidade de linhas (1 a 10)"] linhas: i64,
-    #[description = "Valor da aposta por linha"] aposta: String,
+    #[description = "Valor da aposta por linha (x10 linhas no total)"] aposta: String,
 ) -> Result<(), Error> {
     let user = ctx.author();
     let user_db = get_user(&user.id.to_string()).await?;
-    if !(1..=10).contains(&linhas) {
-        ctx.say("Quantidade de linhas inválida. Use entre 1 e 10.")
-            .await?;
-        return Ok(());
-    }
 
     let aposta = if aposta.to_lowercase() == "allwin" {
-        user_db.coins / linhas
+        user_db.coins / NUM_PAYLINES
     } else {
         match aposta.parse::<i64>() {
             Ok(val) => val,
@@ -58,15 +64,19 @@ pub async fn niquel(
     };
 
     if aposta <= 0 {
-        ctx.say("Valor de aposta inválido ou moedas insuficientes para preencher as linhas.").await?;
+        ctx.say("Valor de aposta inválido.").await?;
         return Ok(());
     }
 
-    let total_aposta = linhas * aposta;
+    // Caça-níquel real: sempre 10 linhas ativas
+    let total_aposta = NUM_PAYLINES * aposta;
 
     if user_db.coins < total_aposta {
-        ctx.say("Você não tem coins suficientes para apostar.")
-            .await?;
+        ctx.say(format!(
+            "Você não tem coins suficientes. Aposta total: {} coins ({} linhas x {}).",
+            total_aposta, NUM_PAYLINES, aposta
+        ))
+        .await?;
         return Ok(());
     }
 
@@ -81,7 +91,6 @@ pub async fn niquel(
         .send(CreateReply {
             embeds: vec![build_spinning_embed(
                 &grid,
-                linhas,
                 aposta,
                 total_aposta,
                 0,
@@ -95,7 +104,7 @@ pub async fn niquel(
     let mut message = reply.message().await?.into_owned();
     let mut animation_edit_failed = false;
 
-    // Revela coluna por coluna (são 5 colunas)
+    // Revela coluna por coluna (5 colunas)
     for col in 0..5 {
         tokio::time::sleep(Duration::from_millis(1200)).await;
 
@@ -110,7 +119,6 @@ pub async fn niquel(
                     ctx.serenity_context(),
                     EditMessage::new().embed(build_spinning_embed(
                         &grid,
-                        linhas,
                         aposta,
                         total_aposta,
                         col + 1,
@@ -126,10 +134,10 @@ pub async fn niquel(
         }
     }
 
-    // Calcula os resultados das linhas ativas
+    // Calcula os resultados das 10 linhas
     let mut line_results: Vec<(usize, LineResult)> = Vec::new();
 
-    for i in 0..(linhas as usize) {
+    for i in 0..PAYLINES.len() {
         if let Some(mut result) = calculate_line(&grid, i) {
             result.payout = ((aposta as f64) * result.multiplier).floor() as i64;
             line_results.push((i, result));
@@ -147,7 +155,6 @@ pub async fn niquel(
     let result_embed = build_result_embed(
         &grid,
         &line_results,
-        linhas,
         total_aposta,
         payout,
         saldo_final,
@@ -176,7 +183,6 @@ pub async fn niquel(
 
 fn build_spinning_embed(
     grid: &[Vec<String>],
-    linhas: i64,
     aposta: i64,
     total_aposta: i64,
     revealed_count: usize,
@@ -188,14 +194,14 @@ fn build_spinning_embed(
         .thumbnail(user_image_url)
         .color(Colour::DARK_GOLD)
         .description(render_grid(grid))
-        .field("Linhas Ativas", linhas.to_string(), true)
-        .field("Aposta por linha", aposta.to_string(), true)
-        .field("Aposta total", total_aposta.to_string(), true)
+        .field("Linhas Ativas", format!("{}", NUM_PAYLINES), true)
+        .field("Aposta por linha", format!("{} coins", aposta), true)
+        .field("Aposta total", format!("{} coins", total_aposta), true)
         .field("Colunas reveladas", format!("{}/5", revealed_count), true)
         .field("Status", "Girando...", true)
         .field(
-            "Tabela de Pagamento (Da esquerda para a direita, min 3 iguais)",
-            "🃏 (Wild, substitui todos)\n💎=200x | 💰=100x | 🐒=50x | 🍉=25x | 🍊=20x | 🍋=15x | 🍒=10x",
+            "Tabela de Pagamento (Esq → Dir, mín 3 iguais)",
+            "🃏 Wild (substitui todos)\n💎 200/50/10x | 💰 100/25/5x | 🐒 50/15/4x | 🍉 25/10/3x | 🍊 20/8/2x | 🍋 15/6/1.5x | 🍒 10/4/1x",
             false,
         )
 }
@@ -203,7 +209,6 @@ fn build_spinning_embed(
 fn build_result_embed(
     grid: &[Vec<String>],
     line_results: &[(usize, LineResult)],
-    linhas: i64,
     total_aposta: i64,
     payout: i64,
     saldo_final: i64,
@@ -214,7 +219,7 @@ fn build_result_embed(
     let lucro = payout - total_aposta;
     let status_text = if won {
         if lucro >= 0 {
-            format!("Ganhou **{}** coin(s) e lucrou **{}** coin(s)!", payout, lucro)
+            format!("Ganhou **{}** coin(s) e lucrou **{}** coin(s)! 🎉", payout, lucro)
         } else {
             format!(
                 "Ganhou **{}** coin(s), mas ficou **{}** coin(s) no prejuízo na rodada.",
@@ -253,24 +258,23 @@ fn build_result_embed(
             Colour::DARK_RED
         })
         .description(render_grid(grid))
-        .field("Linhas Ativas", linhas.to_string(), true)
-        .field("Aposta Total", total_aposta.to_string(), true)
-        .field("Pagamento Total", payout.to_string(), true)
-        .field("Saldo Atual", saldo_final.to_string(), true)
+        .field("Aposta Total", format!("{} coins", total_aposta), true)
+        .field("Pagamento Total", format!("{} coins", payout), true)
+        .field("Saldo Atual", format!("{} coins", saldo_final), true)
         .field("Status", status_text, false)
         .field("Detalhes das Linhas Ganhas", detalhes_linhas, false)
 }
 
 fn calculate_line(grid: &[Vec<String>], payline_idx: usize) -> Option<LineResult> {
     let line_def = &PAYLINES[payline_idx];
-    
+
     // Extrai os 5 símbolos desta linha da esquerda para a direita
     let symbols: Vec<String> = (0..5).map(|col| grid[line_def[col]][col].clone()).collect();
-    
-    // Encontra o "símbolo base" (o primeiro que não seja Wild)
+
+    // Encontra o "símbolo base" (o primeiro não-Wild)
     let mut base_symbol = &symbols[0];
     let mut count = 0;
-    
+
     for (i, sym) in symbols.iter().enumerate() {
         if base_symbol == "🃏" && sym != "🃏" {
             base_symbol = sym;
@@ -281,9 +285,9 @@ fn calculate_line(grid: &[Vec<String>], payline_idx: usize) -> Option<LineResult
             break;
         }
     }
-    
+
     let multiplier = get_symbol_multiplier(base_symbol, count);
-    
+
     if multiplier > 0.0 {
         Some(LineResult {
             multiplier,
@@ -305,7 +309,7 @@ fn get_symbol_multiplier(symbol: &str, count: usize) -> f64 {
         "🍊" => match count { 5 => 20.0, 4 => 8.0, 3 => 2.0, _ => 0.0 },
         "🍋" => match count { 5 => 15.0, 4 => 6.0, 3 => 1.5, _ => 0.0 },
         "🍒" => match count { 5 => 10.0, 4 => 4.0, 3 => 1.0, _ => 0.0 },
-        "🃏" => match count { 5 => 200.0, 4 => 50.0, 3 => 10.0, _ => 0.0 }, // Pagamento caso seja uma linha 100% de coringas
+        "🃏" => match count { 5 => 200.0, 4 => 50.0, 3 => 10.0, _ => 0.0 },
         _ => 0.0
     }
 }
