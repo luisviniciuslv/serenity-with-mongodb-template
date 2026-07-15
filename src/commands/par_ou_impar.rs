@@ -47,6 +47,7 @@ async fn run_bet_command(
         "Escolha inválida. Use \"par\" ou \"impar\".".to_string()
     } else {
         let aposta = aposta.unwrap();
+        update_coins(&user.id.to_string(), -aposta).await?;
         let numero = generate_random_number(100);
 
         let ganhou = match escolha.as_str() {
@@ -56,10 +57,14 @@ async fn run_bet_command(
         };
 
         if ganhou {
-            let updated_user = update_coins(&user.id.to_string(), aposta).await?;
-            format!("Número gerado: {numero}\nVocê ganhou {aposta} coins\nSaldo atual: {} coins", updated_user.coins)
+            let premio = aposta * 2;
+            let updated_user = update_coins(&user.id.to_string(), premio).await?;
+            format!(
+                "Número gerado: {numero}\nVocê ganhou!\nPrêmio: {premio} coins\nSaldo atual: {} coins",
+                updated_user.coins
+            )
         } else {
-            let updated_user = update_coins(&user.id.to_string(), -aposta).await?;
+            let updated_user = get_user(&user.id.to_string()).await?;
             format!("Número gerado: {numero}\nVocê perdeu {aposta} coins\nSaldo atual: {} coins", updated_user.coins)
         }
     };

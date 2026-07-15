@@ -32,13 +32,17 @@ pub async fn highlow(
         return Ok(());
     }
 
+    // The first round is paid as soon as the command starts.
+    let mut saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
+    let mut first_round_pending = true;
+
     let mut deck = shuffled_deck();
     let mut current_card = draw_card(&mut deck).expect("Deck should start with cards");
     let mut streak = user_db.highlow_streak;
 
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_waiting_embed(current_card, aposta, streak, user_db.coins)],
+            embeds: vec![build_waiting_embed(current_card, aposta, streak, saldo_apos_aposta)],
             components: Some(default_components()),
             ..Default::default()
         })
@@ -90,28 +94,31 @@ pub async fn highlow(
             continue;
         }
 
-        let fresh_user = get_user(&user.id.to_string()).await?;
-        if fresh_user.coins < aposta {
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    CreateInteractionResponse::UpdateMessage(
-                        CreateInteractionResponseMessage::new()
-                            .embed(build_error_embed(
-                                current_card,
-                                aposta,
-                                streak,
-                                "Saldo insuficiente para continuar o highlow.",
-                            ))
-                            .components(vec![]),
-                    ),
-                )
-                .await?;
-            break;
-        }
+        if first_round_pending {
+            first_round_pending = false;
+        } else {
+            let fresh_user = get_user(&user.id.to_string()).await?;
+            if fresh_user.coins < aposta {
+                interaction
+                    .create_response(
+                        ctx.serenity_context(),
+                        CreateInteractionResponse::UpdateMessage(
+                            CreateInteractionResponseMessage::new()
+                                .embed(build_error_embed(
+                                    current_card,
+                                    aposta,
+                                    streak,
+                                    "Saldo insuficiente para continuar o highlow.",
+                                ))
+                                .components(vec![]),
+                        ),
+                    )
+                    .await?;
+                break;
+            }
 
-        update_coins(&user.id.to_string(), -aposta).await?;
-        let saldo_apos_aposta = get_user(&user.id.to_string()).await?.coins;
+            saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
+        }
 
         let Some(next_card) = draw_non_tie_card(&mut deck, current_card.rank) else {
             let bonus = cashout_bonus(aposta, streak);
