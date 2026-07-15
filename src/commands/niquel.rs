@@ -39,9 +39,11 @@ pub async fn niquel(
     let linhas_usize = linhas as usize;
     let mut slots = vec![vec!["?".to_string(), "?".to_string(), "?".to_string()]; linhas_usize];
 
+    let user_image_url = user.face().to_string();
+
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_spinning_embed(&slots, linhas, aposta, total_aposta, 0)],
+            embeds: vec![build_spinning_embed(&slots, linhas, aposta, total_aposta, 0, &user.name, &user_image_url)],
             ..Default::default()
         })
         .await?;
@@ -66,6 +68,8 @@ pub async fn niquel(
                     aposta,
                     total_aposta,
                     col + 1,
+                    &user.name,
+                    &user_image_url,
                 )),
             )
             .await;
@@ -121,9 +125,12 @@ fn build_spinning_embed(
     aposta: i64,
     total_aposta: i64,
     revealed_count: usize,
+    user_name: &str,
+    user_image_url: &str
 ) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Caça-níquel")
+        .title(&format!("Caça-níquel de {}", user_name))
+        .thumbnail(user_image_url)
         .color(Colour::DARK_GOLD)
         .description(render_slots_table(slots))
         .field("Linhas", linhas.to_string(), true)
