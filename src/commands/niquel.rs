@@ -57,7 +57,7 @@ pub async fn niquel(
             row[col] = symbol.to_string();
         }
 
-        message
+        let _ = message
             .edit(
                 ctx.serenity_context(),
                 EditMessage::new().embed(build_spinning_embed(
@@ -68,7 +68,7 @@ pub async fn niquel(
                     col + 1,
                 )),
             )
-            .await?;
+            .await;
     }
 
     let line_multipliers: Vec<f64> = slots
@@ -87,20 +87,30 @@ pub async fn niquel(
         saldo_apos_aposta.coins
     };
 
-    message
+    let result_embed = build_result_embed(
+        &slots,
+        &line_multipliers,
+        linhas,
+        aposta,
+        total_aposta,
+        payout,
+        saldo_final,
+    );
+
+    if message
         .edit(
             ctx.serenity_context(),
-            EditMessage::new().embed(build_result_embed(
-                &slots,
-                &line_multipliers,
-                linhas,
-                aposta,
-                total_aposta,
-                payout,
-                saldo_final,
-            )),
+            EditMessage::new().embed(result_embed.clone()),
         )
+        .await
+        .is_err()
+    {
+        ctx.send(CreateReply {
+            embeds: vec![result_embed],
+            ..Default::default()
+        })
         .await?;
+    }
 
     Ok(())
 }
