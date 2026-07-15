@@ -360,6 +360,5 @@ fn cashout_bonus(aposta: i64, streak: i64) -> i64 {
         return 0;
     }
 
-    let bonus = (aposta as f64) * (0.30 * streak as f64);
-    bonus.floor() as i64
+    aposta * streak
 }
