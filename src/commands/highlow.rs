@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::collections::HashSet;
 
 use rand::seq::SliceRandom;
 use poise::serenity_prelude::{
@@ -38,6 +39,8 @@ pub async fn highlow(
 
     let mut deck = shuffled_deck();
     let mut current_card = draw_card(&mut deck).expect("Deck should start with cards");
+    let mut used_ranks: HashSet<i64> = HashSet::new();
+    used_ranks.insert(current_card.rank);
     let mut streak = user_db.highlow_streak;
 
     let reply = ctx
@@ -120,7 +123,7 @@ pub async fn highlow(
             update_coins(&user.id.to_string(), -aposta).await?;
         }
 
-        let Some(next_card) = draw_non_tie_card(&mut deck, current_card.rank) else {
+        let Some(next_card) = draw_next_unique_rank_card(&mut deck, &used_ranks) else {
             let bonus = cashout_bonus(aposta, streak);
             let updated_user = if bonus > 0 {
                 Some(update_coins(&user.id.to_string(), bonus).await?)
@@ -150,6 +153,7 @@ pub async fn highlow(
         } else {
             next_card.rank < current_card.rank
         };
+        used_ranks.insert(next_card.rank);
 
         if won {
             streak += 1;
@@ -349,8 +353,8 @@ fn draw_card(deck: &mut Vec<Card>) -> Option<Card> {
     deck.pop()
 }
 
-fn draw_non_tie_card(deck: &mut Vec<Card>, current_rank: i64) -> Option<Card> {
-    let position = deck.iter().rposition(|card| card.rank != current_rank)?;
+fn draw_next_unique_rank_card(deck: &mut Vec<Card>, used_ranks: &HashSet<i64>) -> Option<Card> {
+    let position = deck.iter().rposition(|card| !used_ranks.contains(&card.rank))?;
     Some(deck.remove(position))
 }
 
