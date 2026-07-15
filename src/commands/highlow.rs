@@ -33,7 +33,7 @@ pub async fn highlow(
     }
 
     let mut deck = shuffled_deck();
-    let mut current_card = draw_card(&mut deck);
+    let mut current_card = draw_card(&mut deck).expect("Deck should start with cards");
     let mut streak = user_db.highlow_streak;
 
     let reply = ctx
@@ -113,7 +113,31 @@ pub async fn highlow(
         update_coins(&user.id.to_string(), -aposta).await?;
         let saldo_apos_aposta = get_user(&user.id.to_string()).await?.coins;
 
-        let next_card = draw_non_tie_card(&mut deck, current_card.rank);
+        let Some(next_card) = draw_non_tie_card(&mut deck, current_card.rank) else {
+            let bonus = cashout_bonus(aposta, streak);
+            let updated_user = if bonus > 0 {
+                Some(update_coins(&user.id.to_string(), bonus).await?)
+            } else {
+                None
+            };
+            set_highlow_streak(&user.id.to_string(), 0).await?;
+            let saldo_atual = updated_user
+                .as_ref()
+                .map(|user| user.coins)
+                .unwrap_or(get_user(&user.id.to_string()).await?.coins);
+
+            interaction
+                .create_response(
+                    ctx.serenity_context(),
+                    CreateInteractionResponse::UpdateMessage(
+                        CreateInteractionResponseMessage::new()
+                            .embed(build_deck_exhausted_embed(current_card, aposta, streak, bonus, saldo_atual))
+                            .components(vec![]),
+                    ),
+                )
+                .await?;
+            break;
+        };
         let won = if custom_id == BTN_HIGH {
             next_card.rank > current_card.rank
         } else {
@@ -266,6 +290,26 @@ fn build_cashout_embed(current_card: Card, aposta: i64, streak: i64, bonus: i64,
         ))
 }
 
+fn build_deck_exhausted_embed(
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+    bonus: i64,
+    saldo_atual: i64,
+) -> CreateEmbed {
+    CreateEmbed::new()
+        .title("HighLow • Fim da sessão")
+        .color(Colour::DARK_ORANGE)
+        .description(format!(
+            "As cartas válidas acabaram sem reposição, então a sessão foi encerrada automaticamente.\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak final: **{}**\nSaque automático: **{}** coin(s)\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
+            card_text(current_card),
+            aposta,
+            streak,
+            bonus,
+            saldo_atual
+        ))
+}
+
 fn build_error_embed(current_card: Card, aposta: i64, streak: i64, message: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
@@ -293,21 +337,13 @@ fn shuffled_deck() -> Vec<Card> {
     deck
 }
 
-fn draw_card(deck: &mut Vec<Card>) -> Card {
-    if deck.is_empty() {
-        *deck = shuffled_deck();
-    }
-
-    deck.pop().expect("Deck should always contain at least one card")
+fn draw_card(deck: &mut Vec<Card>) -> Option<Card> {
+    deck.pop()
 }
 
-fn draw_non_tie_card(deck: &mut Vec<Card>, current_rank: i64) -> Card {
-    loop {
-        let card = draw_card(deck);
-        if card.rank != current_rank {
-            return card;
-        }
-    }
+fn draw_non_tie_card(deck: &mut Vec<Card>, current_rank: i64) -> Option<Card> {
+    let position = deck.iter().rposition(|card| card.rank != current_rank)?;
+    Some(deck.remove(position))
 }
 
 fn card_rank(value: i64) -> &'static str {
