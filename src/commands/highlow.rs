@@ -33,7 +33,7 @@ pub async fn highlow(
     }
 
     // The first round is paid as soon as the command starts.
-    let mut saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
+    let saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
     let mut first_round_pending = true;
 
     let mut deck = shuffled_deck();
@@ -117,7 +117,7 @@ pub async fn highlow(
                 break;
             }
 
-            saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?.coins;
+            update_coins(&user.id.to_string(), -aposta).await?;
         }
 
         let Some(next_card) = draw_non_tie_card(&mut deck, current_card.rank) else {
@@ -174,13 +174,14 @@ pub async fn highlow(
                 .await?;
         } else {
             set_highlow_streak(&user.id.to_string(), 0).await?;
+            let updated_user = get_user(&user.id.to_string()).await?;
 
             interaction
                 .create_response(
                     ctx.serenity_context(),
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
-                            .embed(build_loss_embed(current_card, next_card, aposta, saldo_apos_aposta))
+                            .embed(build_loss_embed(current_card, next_card, aposta, updated_user.coins))
                             .components(vec![]),
                     ),
                 )

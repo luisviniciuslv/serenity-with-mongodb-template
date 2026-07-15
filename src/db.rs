@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use mongodb::bson::{doc, Document};
 use mongodb::{options::ClientOptions, Client, Collection};
 use mongodb::error::Result;
+use serenity::futures::TryStreamExt;
 use std::sync::Mutex;
 use mongodb::bson::to_bson;
 use mongodb::bson::from_document;
@@ -94,11 +95,10 @@ pub async fn get_user(user_id: &str) -> Result<UserModel> {
 
 pub async fn update_coins(user_id: &str, coins: i64) -> Result<UserModel> {
   let user_collection: Collection<Document> = USER_COLLECTION.lock().unwrap().clone().unwrap();
-  let mut user = get_user(user_id).await?;
-
-  user.coins += coins;
-  user_collection.update_one(doc! {"_id": user.clone()._id}, doc! {"$set": doc! {"coins": user.clone().coins}}).await?;
-  Ok(user)
+  user_collection
+    .update_one(doc! {"_id": user_id}, doc! {"$inc": doc! {"coins": coins}})
+    .await?;
+  get_user(user_id).await
 }
 
 pub async fn set_highlow_streak(user_id: &str, streak: i64) -> Result<UserModel> {
@@ -166,16 +166,40 @@ pub fn calculate_pending_reward(user: &UserModel, now: i64) -> (i64, i64, bool) 
 }
 
 pub async fn collect_reward(user_id: &str) -> Result<(UserModel, i64, bool)> {
+  let user_collection: Collection<Document> = USER_COLLECTION.lock().unwrap().clone().unwrap();
   let mut user = get_user(user_id).await?;
   let now = get_current_timestamp();
   let (reward_amount, completed_intervals, was_capped) = calculate_pending_reward(&user, now);
 
   if reward_amount > 0 {
-    user.coins += reward_amount;
-    // Consume all elapsed intervals so overflow above cap is discarded.
-    user.last_reward += completed_intervals * REWARD_INTERVAL_SECONDS;
-    update_user(&user).await?;
+    let consumed_seconds = completed_intervals * REWARD_INTERVAL_SECONDS;
+    // Use atomic increments to avoid overwriting concurrent game coin updates.
+    user_collection
+      .update_one(
+        doc! {"_id": user_id},
+        doc! {
+          "$inc": doc! {
+            "coins": reward_amount,
+            "last_reward": consumed_seconds,
+          }
+        },
+      )
+      .await?;
+    user = get_user(user_id).await?;
   }
 
   Ok((user, reward_amount, was_capped))
+}
+
+pub async fn get_all_users() -> Result<Vec<UserModel>> {
+  let user_collection: Collection<Document> = USER_COLLECTION.lock().unwrap().clone().unwrap();
+  let mut users = Vec::new();
+
+  let mut cursor = user_collection.find(doc! {}).await?;
+  while let Some(doc) = cursor.try_next().await? {
+    let user: UserModel = from_document(doc)?;
+    users.push(user);
+  }
+
+  Ok(users)
 }
