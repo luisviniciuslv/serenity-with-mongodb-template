@@ -11,50 +11,75 @@ const SYMBOLS: [&str; 7] = ["💎", "💰", "🤑", "🐒", "😒", "🐈‍⬛"
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
 pub async fn niquel(
     ctx: Context<'_>,
-    #[description = "Valor da aposta"] aposta: i64,
+    #[description = "Quantidade de linhas (1 a 10)"] linhas: i64,
+    #[description = "Valor da aposta por linha"] aposta: i64,
 ) -> Result<(), Error> {
     let user = ctx.author();
     let user_db = get_user(&user.id.to_string()).await?;
+
+    if !(1..=10).contains(&linhas) {
+        ctx.say("Quantidade de linhas inválida. Use entre 1 e 10.").await?;
+        return Ok(());
+    }
 
     if aposta <= 0 {
         ctx.say("Valor de aposta inválido.").await?;
         return Ok(());
     }
 
-    if user_db.coins < aposta {
+    let total_aposta = linhas * aposta;
+
+    if user_db.coins < total_aposta {
         ctx.say("Você não tem coins suficientes para apostar.").await?;
         return Ok(());
     }
 
-    let saldo_apos_aposta = update_coins(&user.id.to_string(), -aposta).await?;
+    let saldo_apos_aposta = update_coins(&user.id.to_string(), -total_aposta).await?;
 
-    let mut slots = vec!["?".to_string(), "?".to_string(), "?".to_string()];
+    let linhas_usize = linhas as usize;
+    let mut slots = vec![vec!["?".to_string(), "?".to_string(), "?".to_string()]; linhas_usize];
 
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_spinning_embed(&slots, aposta, 0)],
+            embeds: vec![build_spinning_embed(&slots, linhas, aposta, total_aposta, 0)],
             ..Default::default()
         })
         .await?;
 
     let mut message = reply.message().await?.into_owned();
 
-    for i in 0..3 {
+    // Revela por coluna para todas as linhas: 1a, 2a e 3a.
+    for col in 0..3 {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        let symbol = SYMBOLS[rand::random_range(0..SYMBOLS.len())];
-        slots[i] = symbol.to_string();
+        for row in slots.iter_mut() {
+            let symbol = SYMBOLS[rand::random_range(0..SYMBOLS.len())];
+            row[col] = symbol.to_string();
+        }
 
         message
             .edit(
                 ctx.serenity_context(),
-                EditMessage::new().embed(build_spinning_embed(&slots, aposta, i + 1)),
+                EditMessage::new().embed(build_spinning_embed(
+                    &slots,
+                    linhas,
+                    aposta,
+                    total_aposta,
+                    col + 1,
+                )),
             )
             .await?;
     }
 
-    let multiplier = calculate_multiplier(&slots);
-    let payout = (aposta as f64 * multiplier).floor() as i64;
+    let line_multipliers: Vec<f64> = slots
+        .iter()
+        .map(|line| calculate_multiplier(line))
+        .collect();
+
+    let payout: i64 = line_multipliers
+        .iter()
+        .map(|multiplier| ((aposta as f64) * multiplier).floor() as i64)
+        .sum();
 
     let saldo_final = if payout > 0 {
         update_coins(&user.id.to_string(), payout).await?.coins
@@ -65,22 +90,35 @@ pub async fn niquel(
     message
         .edit(
             ctx.serenity_context(),
-            EditMessage::new().embed(build_result_embed(&slots, aposta, multiplier, payout, saldo_final)),
+            EditMessage::new().embed(build_result_embed(
+                &slots,
+                &line_multipliers,
+                linhas,
+                aposta,
+                total_aposta,
+                payout,
+                saldo_final,
+            )),
         )
         .await?;
 
     Ok(())
 }
 
-fn build_spinning_embed(slots: &[String], aposta: i64, revealed_count: usize) -> CreateEmbed {
+fn build_spinning_embed(
+    slots: &[Vec<String>],
+    linhas: i64,
+    aposta: i64,
+    total_aposta: i64,
+    revealed_count: usize,
+) -> CreateEmbed {
     CreateEmbed::new()
         .title("Caça-níquel")
         .color(Colour::DARK_GOLD)
-        .description(format!(
-            "```\n┌───────────────┐\n│  {}  {}  {}  │\n└───────────────┘\n```",
-            slots[0], slots[1], slots[2]
-        ))
-        .field("Aposta", aposta.to_string(), true)
+        .description(render_slots_table(slots))
+        .field("Linhas", linhas.to_string(), true)
+        .field("Aposta por linha", aposta.to_string(), true)
+        .field("Aposta total", total_aposta.to_string(), true)
         .field("Reels revelados", format!("{}/3", revealed_count), true)
         .field("Status", "Girando...", true)
         .field(
@@ -91,30 +129,42 @@ fn build_spinning_embed(slots: &[String], aposta: i64, revealed_count: usize) ->
 }
 
 fn build_result_embed(
-    slots: &[String],
+    slots: &[Vec<String>],
+    line_multipliers: &[f64],
+    linhas: i64,
     aposta: i64,
-    multiplier: f64,
+    total_aposta: i64,
     payout: i64,
     saldo_final: i64,
 ) -> CreateEmbed {
     let won = payout > 0;
+    let lucro = payout - total_aposta;
     let status_text = if won {
-        format!("Você ganhou {} coin(s)!", payout)
+        if lucro >= 0 {
+            format!("Você ganhou {} coin(s) e lucrou {} coin(s)!", payout, lucro)
+        } else {
+            format!("Você ganhou {} coin(s), mas ainda ficou -{} coin(s) nesta rodada.", payout, -lucro)
+        }
     } else {
-        "Você não ganhou nada desta vez.".to_string()
+        format!("Você não ganhou nada desta vez. Prejuízo: {} coin(s).", total_aposta)
     };
+
+    let mut detalhes_linhas = String::new();
+    for (index, multiplier) in line_multipliers.iter().enumerate() {
+        let line_payout = ((aposta as f64) * multiplier).floor() as i64;
+        detalhes_linhas.push_str(&format!("L{}: {:.2}x ({} coin)\n", index + 1, multiplier, line_payout));
+    }
 
     CreateEmbed::new()
         .title("Caça-níquel • Resultado")
         .color(if won { Colour::DARK_GREEN } else { Colour::DARK_RED })
-        .description(format!(
-            "```\n┌───────────────┐\n│  {}  {}  {}  │\n└───────────────┘\n```",
-            slots[0], slots[1], slots[2]
-        ))
-        .field("Aposta", aposta.to_string(), true)
-        .field("Multiplicador", format!("{:.2}x", multiplier), true)
-        .field("Pagamento", payout.to_string(), true)
+        .description(render_slots_table(slots))
+        .field("Linhas", linhas.to_string(), true)
+        .field("Aposta por linha", aposta.to_string(), true)
+        .field("Aposta total", total_aposta.to_string(), true)
+        .field("Pagamento total", payout.to_string(), true)
         .field("Saldo atual", saldo_final.to_string(), true)
+        .field("Resultado por linha", detalhes_linhas, false)
         .field("Status", status_text, false)
 }
 
@@ -141,4 +191,17 @@ fn calculate_multiplier(slots: &[String]) -> f64 {
     }
 
     0.0
+}
+
+fn render_slots_table(slots: &[Vec<String>]) -> String {
+    let mut lines = Vec::with_capacity(slots.len());
+
+    for line in slots {
+        lines.push(format!("│  {}  {}  {}  │", line[0], line[1], line[2]));
+    }
+
+    format!(
+        "```\n┌───────────────┐\n{}\n└───────────────┘\n```",
+        lines.join("\n")
+    )
 }
