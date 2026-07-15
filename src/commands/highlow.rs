@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use rand::seq::SliceRandom;
 use poise::serenity_prelude::{
     ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed, CreateInteractionResponse,
     CreateInteractionResponseMessage,
@@ -31,7 +32,8 @@ pub async fn highlow(
         return Ok(());
     }
 
-    let mut current_card = draw_card_value();
+    let mut deck = shuffled_deck();
+    let mut current_card = draw_card(&mut deck);
     let mut streak = user_db.highlow_streak;
 
     let reply = ctx
@@ -104,14 +106,14 @@ pub async fn highlow(
 
         update_coins(&user.id.to_string(), -aposta).await?;
 
-        let next_card = draw_card_value();
+        let next_card = draw_card(&mut deck);
         let won = if custom_id == BTN_HIGH {
-            next_card > current_card
+            next_card.rank > current_card.rank
         } else {
-            next_card < current_card
+            next_card.rank < current_card.rank
         };
 
-        let tie = next_card == current_card;
+        let tie = next_card.rank == current_card.rank;
 
         if won {
             streak += 1;
@@ -157,7 +159,7 @@ pub async fn highlow(
 async fn interaction_timeout_update(
     ctx: &Context<'_>,
     message: &mut poise::serenity_prelude::Message,
-    current_card: i64,
+    current_card: Card,
     aposta: i64,
     streak: i64,
 ) -> Result<(), Error> {
@@ -192,12 +194,12 @@ fn default_components() -> Vec<CreateActionRow> {
     ])]
 }
 
-fn build_waiting_embed(current_card: i64, aposta: i64, streak: i64) -> CreateEmbed {
+fn build_waiting_embed(current_card: Card, aposta: i64, streak: i64) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
         .color(Colour::DARK_BLUE)
         .description(format!(
-            "Carta atual (copas):\n{}\n\nAposta por rodada: **{}**\nStreak atual: **{}**\nBônus de saque agora: **{}** coin(s)\n\nClique em **Maior** se acha que a próxima carta será maior.\nClique em **Menor** se acha que a próxima carta será menor.",
+            "Carta atual:\n{}\n\nAposta por rodada: **{}**\nStreak atual: **{}**\nBônus de saque agora: **{}** coin(s)\n\nClique em **Maior** se acha que a próxima carta será maior.\nClique em **Menor** se acha que a próxima carta será menor.",
             card_text(current_card),
             aposta,
             streak,
@@ -206,8 +208,8 @@ fn build_waiting_embed(current_card: i64, aposta: i64, streak: i64) -> CreateEmb
 }
 
 fn build_win_embed(
-    previous_card: i64,
-    revealed_card: i64,
+    previous_card: Card,
+    revealed_card: Card,
     aposta: i64,
     streak: i64,
     multiplier: f64,
@@ -229,7 +231,7 @@ fn build_win_embed(
         .field("Próxima jogada", "Escolha Maior ou Menor novamente.", true)
 }
 
-fn build_loss_embed(previous_card: i64, revealed_card: i64, aposta: i64, tie: bool) -> CreateEmbed {
+fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, tie: bool) -> CreateEmbed {
     let reason = if tie {
         "Empate conta como derrota."
     } else {
@@ -248,7 +250,7 @@ fn build_loss_embed(previous_card: i64, revealed_card: i64, aposta: i64, tie: bo
         ))
 }
 
-fn build_cashout_embed(current_card: i64, aposta: i64, streak: i64, bonus: i64) -> CreateEmbed {
+fn build_cashout_embed(current_card: Card, aposta: i64, streak: i64, bonus: i64) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Saque realizado")
         .color(Colour::DARK_GREY)
@@ -261,7 +263,7 @@ fn build_cashout_embed(current_card: i64, aposta: i64, streak: i64, bonus: i64) 
         ))
 }
 
-fn build_error_embed(current_card: i64, aposta: i64, streak: i64, message: &str) -> CreateEmbed {
+fn build_error_embed(current_card: Card, aposta: i64, streak: i64, message: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
         .color(Colour::DARK_ORANGE)
@@ -274,8 +276,26 @@ fn build_error_embed(current_card: i64, aposta: i64, streak: i64, message: &str)
         ))
 }
 
-fn draw_card_value() -> i64 {
-    rand::random_range(1..=13)
+fn shuffled_deck() -> Vec<Card> {
+    let mut deck = Vec::with_capacity(52);
+
+    for suit in Suit::all() {
+        for rank in 1..=13 {
+            deck.push(Card { rank, suit });
+        }
+    }
+
+    let mut rng = rand::rng();
+    deck.shuffle(&mut rng);
+    deck
+}
+
+fn draw_card(deck: &mut Vec<Card>) -> Card {
+    if deck.is_empty() {
+        *deck = shuffled_deck();
+    }
+
+    deck.pop().expect("Deck should always contain at least one card")
 }
 
 fn card_rank(value: i64) -> &'static str {
@@ -297,9 +317,38 @@ fn card_rank(value: i64) -> &'static str {
     }
 }
 
-fn card_text(value: i64) -> String {
-    let rank = card_rank(value);
-    format!("```\n┌───────┐\n│  {:<2} ♥ │\n└───────┘\n```", rank)
+#[derive(Clone, Copy)]
+struct Card {
+    rank: i64,
+    suit: Suit,
+}
+
+#[derive(Clone, Copy)]
+enum Suit {
+    Hearts,
+    Diamonds,
+    Clubs,
+    Spades,
+}
+
+impl Suit {
+    fn all() -> [Suit; 4] {
+        [Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades]
+    }
+
+    fn symbol(self) -> &'static str {
+        match self {
+            Suit::Hearts => "♥",
+            Suit::Diamonds => "♦",
+            Suit::Clubs => "♣",
+            Suit::Spades => "♠",
+        }
+    }
+}
+
+fn card_text(card: Card) -> String {
+    let rank = card_rank(card.rank);
+    format!("```\n┌───────┐\n│  {:<2} {} │\n└───────┘\n```", rank, card.suit.symbol())
 }
 
 fn streak_multiplier(streak: i64) -> f64 {
