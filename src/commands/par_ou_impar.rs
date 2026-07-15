@@ -7,7 +7,7 @@ use crate::{Context, Error};
 pub async fn par_ou_impar(
     ctx: Context<'_>,
     #[description = "Escolha par ou impar"] escolha: String,
-    #[description = "Valor que deseja apostar"] aposta: Option<i64>,
+    #[description = "Valor que deseja apostar"] aposta: Option<String>,
 ) -> Result<(), Error> {
     run_bet_command(ctx, escolha, aposta).await
 }
@@ -15,7 +15,7 @@ pub async fn par_ou_impar(
 #[poise::command(prefix_command, user_cooldown = 5)]
 pub async fn par(
     ctx: Context<'_>,
-    #[description = "Valor que deseja apostar"] aposta: Option<i64>,
+    #[description = "Valor que deseja apostar"] aposta: Option<String>,
 ) -> Result<(), Error> {
     run_bet_command(ctx, "par".to_string(), aposta).await
 }
@@ -23,7 +23,7 @@ pub async fn par(
 #[poise::command(prefix_command, user_cooldown = 5)]
 pub async fn impar(
     ctx: Context<'_>,
-    #[description = "Valor que deseja apostar"] aposta: Option<i64>,
+    #[description = "Valor que deseja apostar"] aposta: Option<String>,
 ) -> Result<(), Error> {
     run_bet_command(ctx, "impar".to_string(), aposta).await
 }
@@ -31,22 +31,46 @@ pub async fn impar(
 async fn run_bet_command(
     ctx: Context<'_>,
     escolha: String,
-    aposta: Option<i64>,
+    aposta: Option<String>,
 ) -> Result<(), Error> {
     let user = ctx.author();
     let user_db = get_user(&user.id.to_string()).await?;
     let escolha = escolha.to_lowercase();
 
-    let message = if aposta.is_none() {
-        "Use /poi ou !poi <par|impar> <aposta>. Exemplo: !poi par 100".to_string()
-    } else if aposta.unwrap() <= 0 {
+    if aposta.is_none() {
+        ctx.send(CreateReply {
+            content: Some("Use /poi ou !poi <par|impar> <aposta>. Exemplo: !poi par 100".to_string()),
+            ..Default::default()
+        })
+        .await?;
+        return Ok(());
+    }
+
+    let aposta_str = aposta.unwrap();
+    let aposta_val = if aposta_str.to_lowercase() == "allwin" {
+        user_db.coins
+    } else {
+        match aposta_str.parse::<i64>() {
+            Ok(val) => val,
+            Err(_) => {
+                ctx.send(CreateReply {
+                    content: Some("Valor de aposta inválido. Digite um número ou 'allwin'.".to_string()),
+                    ..Default::default()
+                })
+                .await?;
+                return Ok(());
+            }
+        }
+    };
+
+    let message = if aposta_val <= 0 {
         "Valor de aposta inválido".to_string()
-    } else if user_db.coins < aposta.unwrap() {
+    } else if user_db.coins < aposta_val {
         "Você não tem coins suficientes para apostar".to_string()
     } else if escolha != "par" && escolha != "impar" {
         "Escolha inválida. Use \"par\" ou \"impar\".".to_string()
     } else {
-        let aposta = aposta.unwrap();
+        let aposta = aposta_val;
         update_coins(&user.id.to_string(), -aposta).await?;
         let numero = generate_random_number(100);
 

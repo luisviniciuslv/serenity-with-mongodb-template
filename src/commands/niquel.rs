@@ -12,25 +12,39 @@ const SYMBOLS: [&str; 7] = ["💎", "💰", "🤑", "🐒", "😒", "🐈‍⬛"
 pub async fn niquel(
     ctx: Context<'_>,
     #[description = "Quantidade de linhas (1 a 10)"] linhas: i64,
-    #[description = "Valor da aposta por linha"] aposta: i64,
+    #[description = "Valor da aposta por linha"] aposta: String,
 ) -> Result<(), Error> {
     let user = ctx.author();
     let user_db = get_user(&user.id.to_string()).await?;
-
     if !(1..=10).contains(&linhas) {
-        ctx.say("Quantidade de linhas inválida. Use entre 1 e 10.").await?;
+        ctx.say("Quantidade de linhas inválida. Use entre 1 e 10.")
+            .await?;
         return Ok(());
     }
 
+    let aposta = if aposta.to_lowercase() == "allwin" {
+        user_db.coins / linhas
+    } else {
+        match aposta.parse::<i64>() {
+            Ok(val) => val,
+            Err(_) => {
+                ctx.say("Aposta inválida. Digite um número ou 'allwin'.")
+                    .await?;
+                return Ok(());
+            }
+        }
+    };
+
     if aposta <= 0 {
-        ctx.say("Valor de aposta inválido.").await?;
+        ctx.say("Valor de aposta inválido ou moedas insuficientes para preencher as linhas.").await?;
         return Ok(());
     }
 
     let total_aposta = linhas * aposta;
 
     if user_db.coins < total_aposta {
-        ctx.say("Você não tem coins suficientes para apostar.").await?;
+        ctx.say("Você não tem coins suficientes para apostar.")
+            .await?;
         return Ok(());
     }
 
@@ -43,7 +57,15 @@ pub async fn niquel(
 
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_spinning_embed(&slots, linhas, aposta, total_aposta, 0, &user.name, &user_image_url)],
+            embeds: vec![build_spinning_embed(
+                &slots,
+                linhas,
+                aposta,
+                total_aposta,
+                0,
+                &user.name,
+                &user_image_url,
+            )],
             ..Default::default()
         })
         .await?;
@@ -134,7 +156,7 @@ fn build_spinning_embed(
     total_aposta: i64,
     revealed_count: usize,
     user_name: &str,
-    user_image_url: &str
+    user_image_url: &str,
 ) -> CreateEmbed {
     CreateEmbed::new()
         .title(&format!("Caça-níquel de {}", user_name))
@@ -168,21 +190,36 @@ fn build_result_embed(
         if lucro >= 0 {
             format!("Você ganhou {} coin(s) e lucrou {} coin(s)!", payout, lucro)
         } else {
-            format!("Você ganhou {} coin(s), mas ainda ficou -{} coin(s) nesta rodada.", payout, -lucro)
+            format!(
+                "Você ganhou {} coin(s), mas ainda ficou -{} coin(s) nesta rodada.",
+                payout, -lucro
+            )
         }
     } else {
-        format!("Você não ganhou nada desta vez. Prejuízo: {} coin(s).", total_aposta)
+        format!(
+            "Você não ganhou nada desta vez. Prejuízo: {} coin(s).",
+            total_aposta
+        )
     };
 
     let mut detalhes_linhas = String::new();
     for (index, multiplier) in line_multipliers.iter().enumerate() {
         let line_payout = ((aposta as f64) * multiplier).floor() as i64;
-        detalhes_linhas.push_str(&format!("L{}: {:.2}x ({} coin)\n", index + 1, multiplier, line_payout));
+        detalhes_linhas.push_str(&format!(
+            "L{}: {:.2}x ({} coin)\n",
+            index + 1,
+            multiplier,
+            line_payout
+        ));
     }
 
     CreateEmbed::new()
         .title("Caça-níquel • Resultado")
-        .color(if won { Colour::DARK_GREEN } else { Colour::DARK_RED })
+        .color(if won {
+            Colour::DARK_GREEN
+        } else {
+            Colour::DARK_RED
+        })
         .description(render_slots_table(slots))
         .field("Linhas", linhas.to_string(), true)
         .field("Aposta por linha", aposta.to_string(), true)
