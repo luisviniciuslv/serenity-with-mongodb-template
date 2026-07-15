@@ -1,3 +1,4 @@
+use poise::serenity_prelude::{Colour, CreateEmbed};
 use poise::CreateReply;
 
 use crate::db::{get_user, update_coins};
@@ -38,8 +39,12 @@ async fn run_bet_command(
     let escolha = escolha.to_lowercase();
 
     if aposta.is_none() {
+        let embed = CreateEmbed::new()
+            .title("❌ Erro de Sintaxe")
+            .color(Colour::RED)
+            .description("Use `/poi` ou `!poi <par|impar> <aposta>`.\nExemplo: `!poi par 100`");
         ctx.send(CreateReply {
-            content: Some("Use /poi ou !poi <par|impar> <aposta>. Exemplo: !poi par 100".to_string()),
+            embeds: vec![embed],
             ..Default::default()
         })
         .await?;
@@ -53,8 +58,12 @@ async fn run_bet_command(
         match aposta_str.parse::<i64>() {
             Ok(val) => val,
             Err(_) => {
+                let embed = CreateEmbed::new()
+                    .title("❌ Erro")
+                    .color(Colour::RED)
+                    .description("Valor de aposta inválido. Digite um número válido ou `allwin`.");
                 ctx.send(CreateReply {
-                    content: Some("Valor de aposta inválido. Digite um número ou 'allwin'.".to_string()),
+                    embeds: vec![embed],
                     ..Default::default()
                 })
                 .await?;
@@ -63,38 +72,74 @@ async fn run_bet_command(
         }
     };
 
-    let message = if aposta_val <= 0 {
-        "Valor de aposta inválido".to_string()
-    } else if user_db.coins < aposta_val {
-        "Você não tem coins suficientes para apostar".to_string()
-    } else if escolha != "par" && escolha != "impar" {
-        "Escolha inválida. Use \"par\" ou \"impar\".".to_string()
+    if aposta_val <= 0 {
+        let embed = CreateEmbed::new()
+            .title("❌ Erro")
+            .color(Colour::RED)
+            .description("Valor de aposta inválido.");
+        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        return Ok(());
+    }
+
+    if user_db.coins < aposta_val {
+        let embed = CreateEmbed::new()
+            .title("❌ Saldo Insuficiente")
+            .color(Colour::RED)
+            .description("Você não tem coins suficientes para realizar esta aposta.");
+        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        return Ok(());
+    }
+
+    if escolha != "par" && escolha != "impar" {
+        let embed = CreateEmbed::new()
+            .title("❌ Erro")
+            .color(Colour::RED)
+            .description("Escolha inválida. Use apenas `par` ou `impar`.");
+        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        return Ok(());
+    }
+
+    let aposta = aposta_val;
+    update_coins(&user.id.to_string(), -aposta).await?;
+    let numero = generate_random_number(100);
+
+    let ganhou = match escolha.as_str() {
+        "par" => numero % 2 == 0,
+        "impar" => numero % 2 != 0,
+        _ => false,
+    };
+
+    let user_image_url = user.face().to_string();
+
+    let embed = if ganhou {
+        let premio = aposta * 2;
+        let updated_user = update_coins(&user.id.to_string(), premio).await?;
+        CreateEmbed::new()
+            .title("🎲 Par ou Ímpar")
+            .thumbnail(&user_image_url)
+            .color(Colour::DARK_GREEN)
+            .description(format!(
+                "**{}** escolheu **{}** e o número gerado foi **{}**.\n\n🎉 **VOCÊ GANHOU!**",
+                user.name, escolha, numero
+            ))
+            .field("Prêmio", format!("{} coins", premio), true)
+            .field("Saldo Atual", format!("{} coins", updated_user.coins), true)
     } else {
-        let aposta = aposta_val;
-        update_coins(&user.id.to_string(), -aposta).await?;
-        let numero = generate_random_number(100);
-
-        let ganhou = match escolha.as_str() {
-            "par" => numero % 2 == 0,
-            "impar" => numero % 2 != 0,
-            _ => false,
-        };
-
-        if ganhou {
-            let premio = aposta * 2;
-            let updated_user = update_coins(&user.id.to_string(), premio).await?;
-            format!(
-                "Número gerado: {numero}\nVocê ganhou!\nPrêmio: {premio} coins\nSaldo atual: {} coins",
-                updated_user.coins
-            )
-        } else {
-            let updated_user = get_user(&user.id.to_string()).await?;
-            format!("Número gerado: {numero}\nVocê perdeu {aposta} coins\nSaldo atual: {} coins", updated_user.coins)
-        }
+        let updated_user = get_user(&user.id.to_string()).await?;
+        CreateEmbed::new()
+            .title("🎲 Par ou Ímpar")
+            .thumbnail(&user_image_url)
+            .color(Colour::DARK_RED)
+            .description(format!(
+                "**{}** escolheu **{}** mas o número gerado foi **{}**.\n\n💀 **VOCÊ PERDEU!**",
+                user.name, escolha, numero
+            ))
+            .field("Prejuízo", format!("{} coins", aposta), true)
+            .field("Saldo Atual", format!("{} coins", updated_user.coins), true)
     };
 
     ctx.send(CreateReply {
-        content: Some(message),
+        embeds: vec![embed],
         ..Default::default()
     })
     .await?;
@@ -103,6 +148,5 @@ async fn run_bet_command(
 }
 
 fn generate_random_number(range: u32) -> u32 {
-  return rand::random_range(0..range);
+    rand::random_range(0..range)
 }
-    
