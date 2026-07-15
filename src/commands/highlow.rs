@@ -71,7 +71,7 @@ pub async fn highlow(
             let saldo_atual = updated_user
                 .as_ref()
                 .map(|user| user.coins)
-                .unwrap_or(user_db.coins);
+                .unwrap_or(get_user(&user.id.to_string()).await?.coins);
 
             interaction
                 .create_response(
@@ -113,14 +113,12 @@ pub async fn highlow(
         update_coins(&user.id.to_string(), -aposta).await?;
         let saldo_apos_aposta = get_user(&user.id.to_string()).await?.coins;
 
-        let next_card = draw_card(&mut deck);
+        let next_card = draw_non_tie_card(&mut deck, current_card.rank);
         let won = if custom_id == BTN_HIGH {
             next_card.rank > current_card.rank
         } else {
             next_card.rank < current_card.rank
         };
-
-        let tie = next_card.rank == current_card.rank;
 
         if won {
             streak += 1;
@@ -151,7 +149,7 @@ pub async fn highlow(
                     ctx.serenity_context(),
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
-                            .embed(build_loss_embed(current_card, next_card, aposta, tie, saldo_apos_aposta))
+                            .embed(build_loss_embed(current_card, next_card, aposta, saldo_apos_aposta))
                             .components(vec![]),
                     ),
                 )
@@ -241,21 +239,14 @@ fn build_win_embed(
         .field("Próxima jogada", "Escolha Maior ou Menor novamente.", true)
 }
 
-fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, tie: bool, saldo_atual: i64) -> CreateEmbed {
-    let reason = if tie {
-        "Empate conta como derrota."
-    } else {
-        "Você errou a previsão."
-    };
-
+fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, saldo_atual: i64) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Fim de jogo")
         .color(Colour::DARK_RED)
         .description(format!(
-            "Carta anterior:\n{}\nNova carta:\n{}\n\n{}\nPerda desta rodada: **{}**\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
+            "Carta anterior:\n{}\nNova carta:\n{}\n\nVocê errou a previsão.\nPerda desta rodada: **{}**\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
             card_text(previous_card),
             card_text(revealed_card),
-            reason,
             aposta,
             saldo_atual
         ))
@@ -308,6 +299,15 @@ fn draw_card(deck: &mut Vec<Card>) -> Card {
     }
 
     deck.pop().expect("Deck should always contain at least one card")
+}
+
+fn draw_non_tie_card(deck: &mut Vec<Card>, current_rank: i64) -> Card {
+    loop {
+        let card = draw_card(deck);
+        if card.rank != current_rank {
+            return card;
+        }
+    }
 }
 
 fn card_rank(value: i64) -> &'static str {
