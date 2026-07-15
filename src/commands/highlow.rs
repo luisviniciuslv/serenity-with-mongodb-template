@@ -193,37 +193,17 @@ async fn process_cashout(
 }
 
 async fn pay_round_if_needed(
-    ctx: &Context<'_>,
-    interaction: &poise::serenity_prelude::ComponentInteraction,
-    user_id: &str,
-    current_card: Card,
-    aposta: i64,
-    streak: i64,
+    _ctx: &Context<'_>,
+    _interaction: &poise::serenity_prelude::ComponentInteraction,
+    _user_id: &str,
+    _current_card: Card,
+    _aposta: i64,
+    _streak: i64,
     first_round_pending: &mut bool,
 ) -> Result<bool, Error> {
     if *first_round_pending {
         *first_round_pending = false;
-        return Ok(true);
     }
-
-    let fresh_user = get_user(user_id).await?;
-    if fresh_user.coins < aposta {
-        respond_with_embed(
-            ctx,
-            interaction,
-            build_error_embed(
-                current_card,
-                aposta,
-                streak,
-                "Saldo insuficiente para continuar o highlow.",
-            ),
-            vec![],
-        )
-        .await?;
-        return Ok(false);
-    }
-
-    update_coins(user_id, -aposta).await?;
     Ok(true)
 }
 
@@ -271,7 +251,7 @@ async fn process_round_win(
 
     let multiplier = streak_multiplier(next_streak);
     let payout = ((aposta as f64) * multiplier).floor() as i64;
-    let updated_user = update_coins(user_id, payout).await?;
+    let fresh_user = get_user(user_id).await?;
 
     respond_with_embed(
         ctx,
@@ -283,7 +263,7 @@ async fn process_round_win(
             next_streak,
             multiplier,
             payout,
-            updated_user.coins,
+            fresh_user.coins,
         ),
         default_components(),
     )
@@ -591,5 +571,5 @@ fn cashout_bonus(aposta: i64, streak: i64) -> i64 {
         return 0;
     }
 
-    aposta * streak
+    ((aposta as f64) * streak_multiplier(streak)).floor() as i64
 }
