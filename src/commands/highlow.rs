@@ -1,5 +1,5 @@
 use std::time::Duration;
-use std::collections::HashSet;
+use std::cmp::Ordering;
 
 use rand::seq::SliceRandom;
 use poise::serenity_prelude::{
@@ -39,8 +39,6 @@ pub async fn highlow(
 
     let mut deck = shuffled_deck();
     let mut current_card = draw_card(&mut deck).expect("Deck should start with cards");
-    let mut used_ranks: HashSet<i64> = HashSet::new();
-    used_ranks.insert(current_card.rank);
     let mut streak = user_db.highlow_streak;
 
     let reply = ctx
@@ -123,7 +121,7 @@ pub async fn highlow(
             update_coins(&user.id.to_string(), -aposta).await?;
         }
 
-        let Some(next_card) = draw_next_unique_rank_card(&mut deck, &used_ranks) else {
+        let Some(next_card) = draw_card(&mut deck) else {
             let bonus = cashout_bonus(aposta, streak);
             let updated_user = if bonus > 0 {
                 Some(update_coins(&user.id.to_string(), bonus).await?)
@@ -148,12 +146,12 @@ pub async fn highlow(
                 .await?;
             break;
         };
+        let comparison = compare_cards(next_card, current_card);
         let won = if custom_id == BTN_HIGH {
-            next_card.rank > current_card.rank
+            comparison == Ordering::Greater
         } else {
-            next_card.rank < current_card.rank
+            comparison == Ordering::Less
         };
-        used_ranks.insert(next_card.rank);
 
         if won {
             streak += 1;
@@ -353,11 +351,6 @@ fn draw_card(deck: &mut Vec<Card>) -> Option<Card> {
     deck.pop()
 }
 
-fn draw_next_unique_rank_card(deck: &mut Vec<Card>, used_ranks: &HashSet<i64>) -> Option<Card> {
-    let position = deck.iter().rposition(|card| !used_ranks.contains(&card.rank))?;
-    Some(deck.remove(position))
-}
-
 fn card_rank(value: i64) -> &'static str {
     match value {
         1 => "A",
@@ -404,6 +397,23 @@ impl Suit {
             Suit::Spades => "♠",
         }
     }
+
+    // Order requested by game rules: ouros < espadas < copas < paus.
+    fn strength(self) -> i64 {
+        match self {
+            Suit::Diamonds => 1,
+            Suit::Spades => 2,
+            Suit::Hearts => 3,
+            Suit::Clubs => 4,
+        }
+    }
+}
+
+fn compare_cards(left: Card, right: Card) -> Ordering {
+    left
+        .rank
+        .cmp(&right.rank)
+        .then_with(|| left.suit.strength().cmp(&right.suit.strength()))
 }
 
 fn card_text(card: Card) -> String {
