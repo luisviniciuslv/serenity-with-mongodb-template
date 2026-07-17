@@ -69,6 +69,10 @@ pub async fn create_user(user_id: &str) -> Result<UserModel> {
             businesses: Vec::new(),
             highlow_streak: 0,
             bets: Vec::new(),
+            total_won: 0,
+            total_lost: 0,
+            wins: 0,
+            losses: 0,
         };
 
         let bson_user = to_bson(&user)?;
@@ -89,7 +93,23 @@ pub async fn get_user(user_id: &str) -> Result<UserModel> {
     let user_doc = user_collection.find_one(doc! {"_id": user_id}).await?;
     if let Some(doc) = user_doc {
         // Convert the Document back to UserModel
-        let user: UserModel = from_document(doc)?;
+        let mut user: UserModel = from_document(doc)?;
+        
+        // Lazy migration: recupera os totais do histórico se ainda não tiver feito isso.
+        // Assim, quem já jogava não perde as estatísticas no perfil!
+        if user.total_won == 0 && user.total_lost == 0 && user.wins == 0 && user.losses == 0 && !user.bets.is_empty() {
+            for bet in &user.bets {
+                if bet.result == "vitoria" {
+                    user.total_won += bet.value;
+                    user.wins += 1;
+                } else if bet.result == "derrota" {
+                    user.total_lost += bet.value;
+                    user.losses += 1;
+                }
+            }
+            let _ = update_user(&user).await;
+        }
+
         Ok(user)
     } else {
         create_user(user_id).await
@@ -115,7 +135,7 @@ pub async fn set_highlow_streak(user_id: &str, streak: i64) -> Result<UserModel>
     get_user(user_id).await
 }
 
-pub async fn record_bet(user_id: &str, minigame: &str, value: i64, won: bool) -> Result<UserModel> {
+pub async fn record_bet(user_id: &str, minigame: &str, value: i64, won: bool) -> Result<()> {
     let user_collection: Collection<Document> = USER_COLLECTION.lock().unwrap().clone().unwrap();
     let bet = BetHistoryModel {
         minigame: minigame.to_string(),
@@ -128,14 +148,33 @@ pub async fn record_bet(user_id: &str, minigame: &str, value: i64, won: bool) ->
         datetime: get_current_timestamp(),
     };
 
+    let (inc_won, inc_lost, inc_wins, inc_losses) = if won {
+        (value, 0, 1, 0)
+    } else {
+        (0, value, 0, 1)
+    };
+
     user_collection
         .update_one(
             doc! {"_id": user_id},
-            doc! {"$push": doc! {"bets": mongodb::bson::to_document(&bet)?}},
+            doc! {
+                "$push": {
+                    "bets": {
+                        "$each": [mongodb::bson::to_document(&bet)?],
+                        "$slice": -50
+                    }
+                },
+                "$inc": {
+                    "total_won": inc_won,
+                    "total_lost": inc_lost,
+                    "wins": inc_wins,
+                    "losses": inc_losses
+                }
+            },
         )
         .await?;
 
-    get_user(user_id).await
+    Ok(())
 }
 
 pub async fn clear_users_collection() -> Result<u64> {

@@ -10,29 +10,15 @@ use crate::db::{
 };
 
 fn calculate_bet_stats(user_db: &crate::model::UserModel) -> (i64, i64, usize, usize, i64, i64) {
-    let mut total_won = 0;
-    let mut total_lost = 0;
-    let mut wins = 0usize;
-    let mut losses = 0usize;
-
-    for bet in &user_db.bets {
-        match bet.result.as_str() {
-            "vitoria" => {
-                total_won += bet.value;
-                wins += 1;
-            }
-            "derrota" => {
-                total_lost += bet.value;
-                losses += 1;
-            }
-            _ => {}
-        }
-    }
+    let total_won = user_db.total_won;
+    let total_lost = user_db.total_lost;
+    let wins = user_db.wins as usize;
+    let losses = user_db.losses as usize;
 
     let net = total_won - total_lost;
-    let total_bets = wins + losses;
+    let total_bets = (wins + losses) as i64;
 
-    (total_won, total_lost, wins, losses, total_bets as i64, net)
+    (total_won, total_lost, wins, losses, total_bets, net)
 }
 
 #[poise::command(slash_command, prefix_command, aliases("p"))]

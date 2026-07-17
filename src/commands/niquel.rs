@@ -392,28 +392,9 @@ pub async fn niquel(
                     .await;
             }
         } else {
-            // Multi-giro: animação rápida (mostra girando → resultado)
-            tokio::time::sleep(Duration::from_millis(600)).await;
-            let _ = message
-                .edit(
-                    ctx.serenity_context(),
-                    EditMessage::new().embed(
-                        CreateEmbed::new()
-                            .title(format!(
-                                "🎰 Giro {}/{} • {} — Girando...",
-                                spin_num, giros, user.name
-                            ))
-                            .thumbnail(&user_image_url)
-                            .color(Colour::DARK_GOLD)
-                            .description(render_grid(&vec![vec!["?".to_string(); 5]; 3]))
-                            .field("Aposta por Giro", format!("{} coins", aposta_por_giro), true)
-                            .field("Giro", format!("{}/{}", spin_num, giros), true)
-                            .field("💰 Total Ganho", format!("{} coins", total_payout), true)
-                            .field("Saldo Atual", format!("{} coins", saldo_atual), true),
-                    ),
-                )
-                .await;
-            tokio::time::sleep(Duration::from_millis(800)).await;
+            // Multi-giro: apenas aguarda um tempo para simular o giro, 
+            // economizando chamadas na API e evitando rate limit no Discord
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
 
         // ── Avalia resultado ──────────────────────────────────────────────────
@@ -537,7 +518,7 @@ pub async fn niquel(
                 .await;
 
             if spin_idx < giros - 1 {
-                tokio::time::sleep(Duration::from_millis(1800)).await;
+                tokio::time::sleep(Duration::from_millis(1500)).await;
             }
         }
     }

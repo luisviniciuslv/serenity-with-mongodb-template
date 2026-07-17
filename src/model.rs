@@ -53,4 +53,12 @@ pub struct UserModel {
     pub highlow_streak: i64,
     #[serde(default)]
     pub bets: Vec<BetHistoryModel>,
+    #[serde(default)]
+    pub total_won: i64,
+    #[serde(default)]
+    pub total_lost: i64,
+    #[serde(default)]
+    pub wins: i64,
+    #[serde(default)]
+    pub losses: i64,
 }
