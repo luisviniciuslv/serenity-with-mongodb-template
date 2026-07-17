@@ -15,18 +15,18 @@ const WILD: &str = "🃏";
 
 // (símbolo, peso) — maior peso = aparece mais frequentemente
 const WEIGHTED_SYMBOLS: &[(&str, u32)] = &[
-    ("🍒", 22),   // Cherry       — muito comum
-    ("🔔", 19),   // Bell         — comum
-    ("🍋", 17),   // Lemon        — comum
+    ("🍒", 24),   // Cherry       — muito comum
+    ("🔔", 21),   // Bell         — comum
+    ("🍋", 18),   // Lemon        — comum
     ("🍊", 14),   // Orange       — moderado
     ("🍉", 12),   // Watermelon   — moderado
-    ("🐒", 9),    // Monkey       — incomum
+    ("🐒", 8),    // Monkey       — incomum
     ("🍀", 6),    // Clover       — incomum
-    ("💰", 5),    // Moneybag     — raro
+    ("💰", 4),    // Moneybag     — raro
     ("👑", 2),    // Crown        — muito raro
     ("💎", 1),    // Diamond      — LENDÁRIO
-    (WILD, 3),    // Wild         — especial
-    (SCATTER, 3), // Scatter     — especial
+    (WILD, 2),    // Wild         — especial
+    (SCATTER, 2), // Scatter     — especial
 ];
 
 // ─── Paylines ─────────────────────────────────────────────────────────────────
@@ -208,33 +208,33 @@ fn get_symbol_multiplier(symbol: &str, count: usize) -> f64 {
             _ => 0.0,
         },
         "🍉" => match count {
-            5 => 25.0,
-            4 => 10.0,
-            3 => 3.0,
+            5 => 20.0,
+            4 => 8.0,
+            3 => 2.5,
             _ => 0.0,
         },
         "🍊" => match count {
-            5 => 20.0,
-            4 => 8.0,
-            3 => 2.0,
+            5 => 15.0,
+            4 => 6.0,
+            3 => 1.8,
             _ => 0.0,
         },
         "🍋" => match count {
-            5 => 15.0,
-            4 => 6.0,
-            3 => 1.5,
-            _ => 0.0,
-        },
-        "🔔" => match count {
             5 => 12.0,
-            4 => 5.0,
+            4 => 4.0,
             3 => 1.2,
             _ => 0.0,
         },
+        "🔔" => match count {
+            5 => 8.0,
+            4 => 3.0,
+            3 => 0.8,
+            _ => 0.0,
+        },
         "🍒" => match count {
-            5 => 10.0,
-            4 => 4.0,
-            3 => 1.0,
+            5 => 6.0,
+            4 => 2.0,
+            3 => 0.5,
             _ => 0.0,
         },
         WILD => match count {
