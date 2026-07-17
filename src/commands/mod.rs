@@ -7,6 +7,7 @@ pub mod niquel;
 pub mod duelo;
 pub mod highlow;
 pub mod rank;
+pub mod help_cassino;
 
 use poise::Command;
 
@@ -26,5 +27,6 @@ pub fn get_commands() -> Vec<Command<Data, Error>> {
         adm::add_coins(),
         adm::clear_db(),
         rank::rank(),
+        help_cassino::help_cassino(),
     ]
 }

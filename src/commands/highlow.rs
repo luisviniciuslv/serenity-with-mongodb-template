@@ -1,12 +1,12 @@
-use std::time::Duration;
 use std::cmp::Ordering;
+use std::time::Duration;
 
-use rand::seq::SliceRandom;
 use poise::serenity_prelude::{
     ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed, CreateInteractionResponse,
     CreateInteractionResponseMessage,
 };
 use poise::CreateReply;
+use rand::seq::SliceRandom;
 
 use crate::db::{get_user, set_highlow_streak, update_coins};
 use crate::{Context, Error};
@@ -18,21 +18,37 @@ const BTN_CASHOUT: &str = "highlow_cashout";
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
 pub async fn highlow(
     ctx: Context<'_>,
-    #[description = "Valor da aposta por rodada"] aposta: i64,
+    #[description = "Valor da aposta por rodada ou 'allwin'"] aposta: String,
 ) -> Result<(), Error> {
     let user = ctx.author().clone();
     let user_id = user.id.to_string();
+    let user_db = get_user(&user_id).await?;
 
-    if aposta <= 0 {
+    let aposta_val = if aposta.to_lowercase() == "allwin" {
+        user_db.coins
+    } else {
+        match aposta.parse::<i64>() {
+            Ok(val) => val,
+            Err(_) => {
+                ctx.say("Aposta inválida. Digite um número ou 'allwin'.")
+                    .await?;
+                return Ok(());
+            }
+        }
+    };
+
+    if aposta_val <= 0 {
         ctx.say("Aposta inválida.").await?;
         return Ok(());
     }
 
-    let user_db = get_user(&user_id).await?;
-    if user_db.coins < aposta {
-        ctx.say("Você não tem coins suficientes para essa aposta.").await?;
+    if user_db.coins < aposta_val {
+        ctx.say("Você não tem coins suficientes para essa aposta.")
+            .await?;
         return Ok(());
     }
+
+    let aposta = aposta_val;
 
     // The first round is paid as soon as the command starts.
     let saldo_apos_aposta = update_coins(&user_id, -aposta).await?.coins;
@@ -44,7 +60,12 @@ pub async fn highlow(
 
     let reply = ctx
         .send(CreateReply {
-            embeds: vec![build_waiting_embed(current_card, aposta, streak, saldo_apos_aposta)],
+            embeds: vec![build_waiting_embed(
+                current_card,
+                aposta,
+                streak,
+                saldo_apos_aposta,
+            )],
             components: Some(default_components()),
             ..Default::default()
         })
@@ -67,15 +88,7 @@ pub async fn highlow(
         let action_id = interaction.data.custom_id.as_str();
 
         if action_id == BTN_CASHOUT {
-            process_cashout(
-                &ctx,
-                &interaction,
-            &user_id,
-                current_card,
-                aposta,
-                streak,
-            )
-            .await?;
+            process_cashout(&ctx, &interaction, &user_id, current_card, aposta, streak).await?;
             break;
         }
 
@@ -98,15 +111,8 @@ pub async fn highlow(
         }
 
         let Some(next_card) = draw_card(&mut deck) else {
-            process_deck_exhausted(
-                &ctx,
-                &interaction,
-                &user_id,
-                current_card,
-                aposta,
-                streak,
-            )
-            .await?;
+            process_deck_exhausted(&ctx, &interaction, &user_id, current_card, aposta, streak)
+                .await?;
             break;
         };
         let did_win = is_winning_guess(action_id, current_card, next_card);
@@ -117,7 +123,7 @@ pub async fn highlow(
             streak = process_round_win(
                 &ctx,
                 &interaction,
-            &user_id,
+                &user_id,
                 previous_card,
                 next_card,
                 aposta,
@@ -187,37 +193,17 @@ async fn process_cashout(
 }
 
 async fn pay_round_if_needed(
-    ctx: &Context<'_>,
-    interaction: &poise::serenity_prelude::ComponentInteraction,
-    user_id: &str,
-    current_card: Card,
-    aposta: i64,
-    streak: i64,
+    _ctx: &Context<'_>,
+    _interaction: &poise::serenity_prelude::ComponentInteraction,
+    _user_id: &str,
+    _current_card: Card,
+    _aposta: i64,
+    _streak: i64,
     first_round_pending: &mut bool,
 ) -> Result<bool, Error> {
     if *first_round_pending {
         *first_round_pending = false;
-        return Ok(true);
     }
-
-    let fresh_user = get_user(user_id).await?;
-    if fresh_user.coins < aposta {
-        respond_with_embed(
-            ctx,
-            interaction,
-            build_error_embed(
-                current_card,
-                aposta,
-                streak,
-                "Saldo insuficiente para continuar o highlow.",
-            ),
-            vec![],
-        )
-        .await?;
-        return Ok(false);
-    }
-
-    update_coins(user_id, -aposta).await?;
     Ok(true)
 }
 
@@ -265,7 +251,7 @@ async fn process_round_win(
 
     let multiplier = streak_multiplier(next_streak);
     let payout = ((aposta as f64) * multiplier).floor() as i64;
-    let updated_user = update_coins(user_id, payout).await?;
+    let fresh_user = get_user(user_id).await?;
 
     respond_with_embed(
         ctx,
@@ -277,7 +263,7 @@ async fn process_round_win(
             next_streak,
             multiplier,
             payout,
-            updated_user.coins,
+            fresh_user.coins,
         ),
         default_components(),
     )
@@ -360,7 +346,12 @@ fn default_components() -> Vec<CreateActionRow> {
     ])]
 }
 
-fn build_waiting_embed(current_card: Card, aposta: i64, streak: i64, saldo_atual: i64) -> CreateEmbed {
+fn build_waiting_embed(
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+    saldo_atual: i64,
+) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
         .color(Colour::DARK_BLUE)
@@ -400,7 +391,12 @@ fn build_win_embed(
         .field("Próxima jogada", "Escolha Maior ou Menor novamente.", true)
 }
 
-fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, saldo_atual: i64) -> CreateEmbed {
+fn build_loss_embed(
+    previous_card: Card,
+    revealed_card: Card,
+    aposta: i64,
+    saldo_atual: i64,
+) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Fim de jogo")
         .color(Colour::DARK_RED)
@@ -413,7 +409,13 @@ fn build_loss_embed(previous_card: Card, revealed_card: Card, aposta: i64, saldo
         ))
 }
 
-fn build_cashout_embed(current_card: Card, aposta: i64, streak: i64, bonus: i64, saldo_atual: i64) -> CreateEmbed {
+fn build_cashout_embed(
+    current_card: Card,
+    aposta: i64,
+    streak: i64,
+    bonus: i64,
+    saldo_atual: i64,
+) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Saque realizado")
         .color(Colour::DARK_GREY)
@@ -542,7 +544,11 @@ fn compare_cards(left: Card, right: Card) -> Ordering {
 
 fn card_text(card: Card) -> String {
     let rank = card_rank(card.rank);
-    format!("```\n┌───────┐\n│  {:<2} {} │\n└───────┘\n```", rank, card.suit.symbol())
+    format!(
+        "```\n┌───────┐\n│  {:<2} {} │\n└───────┘\n```",
+        rank,
+        card.suit.symbol()
+    )
 }
 
 fn streak_multiplier(streak: i64) -> f64 {
@@ -563,5 +569,5 @@ fn cashout_bonus(aposta: i64, streak: i64) -> i64 {
         return 0;
     }
 
-    aposta * streak
+    ((aposta as f64) * streak_multiplier(streak)).floor() as i64
 }
