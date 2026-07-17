@@ -99,7 +99,7 @@ fn spin_grid() -> Vec<Vec<String>> {
     grid
 }
 
-fn evaluate_spin(grid: &[Vec<String>], aposta: i64) -> SpinResult {
+fn evaluate_spin(grid: &[Vec<String>], aposta_total: i64) -> SpinResult {
     // Conta Scatters em toda a grade (independente de paylines)
     let scatter_count = grid
         .iter()
@@ -107,13 +107,17 @@ fn evaluate_spin(grid: &[Vec<String>], aposta: i64) -> SpinResult {
         .filter(|s| s.as_str() == SCATTER)
         .count();
 
-    let scatter_payout = scatter_bonus(scatter_count, aposta);
+    let scatter_payout = scatter_bonus(scatter_count, aposta_total);
     let free_spins = free_spins_from_scatter(scatter_count);
+
+    // Cada linha paga proporcionalmente à aposta total (aposta_total / NUM_PAYLINES)
+    // para que os multiplicadores façam sentido em relação ao valor apostado.
+    let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
 
     let mut line_results: Vec<(usize, LineResult)> = Vec::new();
     for i in 0..PAYLINES.len() {
         if let Some(mut result) = calculate_line(grid, i) {
-            result.payout = ((aposta as f64) * result.multiplier).floor() as i64;
+            result.payout = ((aposta_por_linha as f64) * result.multiplier).floor() as i64;
             line_results.push((i, result));
         }
     }
@@ -290,7 +294,7 @@ pub async fn niquel(
         return Ok(());
     }
 
-    // Divide internamente em 20 linhas; trunca para múltiplo exato
+    // Trunca aposta total para múltiplo exato de 20 linhas
     let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
     let total_aposta = aposta_por_linha * NUM_PAYLINES;
 
@@ -305,10 +309,10 @@ pub async fn niquel(
 
     let user_image_url = user.face().to_string();
 
-    // Deduz aposta e gira
+    // Deduz aposta e gira — passa a aposta_total para evaluate_spin
     update_coins(&user.id.to_string(), -total_aposta).await?;
     let grid = spin_grid();
-    let result = evaluate_spin(&grid, aposta_por_linha);
+    let result = evaluate_spin(&grid, total_aposta);
     let saldo_final = if result.payout > 0 {
         update_coins(&user.id.to_string(), result.payout)
             .await?
@@ -324,8 +328,6 @@ pub async fn niquel(
         result.payout > 0 || result.free_spins > 0,
     )
     .await?;
-
-    let aposta = aposta_por_linha; // alias para o restante do código
 
     // Animação de giro (mostra "?" e revela coluna por coluna)
     let reply = ctx
@@ -427,7 +429,7 @@ pub async fn niquel(
             run_free_spins(
                 &ctx,
                 &mut message,
-                aposta,
+                total_aposta,
                 total_aposta,
                 free_spins_total,
                 &user.id.to_string(),
@@ -544,7 +546,7 @@ async fn run_free_spins(
                 .await;
         }
 
-        let result = evaluate_spin(&grid, aposta);
+        let result = evaluate_spin(&grid, total_aposta);
         if result.payout > 0 {
             saldo_atual = update_coins(user_id, result.payout).await?.coins;
             total_ganho += result.payout;
