@@ -87,10 +87,13 @@ pub async fn niquel(
         .map(|line| calculate_multiplier(line))
         .collect();
 
+    let comedy_bonus = rare_quartet_bonus(&slots, total_aposta);
+
     let payout: i64 = line_multipliers
         .iter()
         .map(|multiplier| ((aposta as f64) * multiplier).floor() as i64)
-        .sum();
+        .sum::<i64>()
+        + comedy_bonus.as_ref().map(|(_, bonus)| *bonus).unwrap_or(0);
 
     let saldo_final = if payout > 0 {
         update_coins(&user.id.to_string(), payout).await?.coins
@@ -106,6 +109,8 @@ pub async fn niquel(
         total_aposta,
         payout,
         saldo_final,
+        comedy_bonus.as_ref().map(|(label, _)| label.as_str()),
+        comedy_bonus.as_ref().map(|(_, bonus)| *bonus).unwrap_or(0),
     );
 
     if animation_edit_failed
@@ -148,7 +153,7 @@ fn build_spinning_embed(
         .field("Status", "Girando...", true)
         .field(
             "Tabela",
-            "💎💎💎 = x10 | 💰💰💰 = x5 | 🤑🤑🤑 = x2.5\nMix (só desses 3) = média das odds",
+            "💎💎💎 = x8 | 💰💰💰 = x4 | 🤑🤑🤑 = x2\n2 símbolos bons = x0.75 | 1 símbolo bom = x0.20\nQuarteto idêntico em 4 linhas = bônus raro",
             false,
         )
 }
@@ -161,6 +166,8 @@ fn build_result_embed(
     total_aposta: i64,
     payout: i64,
     saldo_final: i64,
+    comedy_bonus_label: Option<&str>,
+    comedy_bonus_value: i64,
 ) -> CreateEmbed {
     let won = payout > 0;
     let lucro = payout - total_aposta;
@@ -190,6 +197,13 @@ fn build_result_embed(
         .field("Pagamento total", payout.to_string(), true)
         .field("Saldo atual", saldo_final.to_string(), true)
         .field("Resultado por linha", detalhes_linhas, false)
+        .field(
+            "Jogada cômica",
+            comedy_bonus_label
+                .map(|label| format!("{} (+{} coin)", label, comedy_bonus_value))
+                .unwrap_or_else(|| "Nenhuma desta vez.".to_string()),
+            false,
+        )
         .field("Status", status_text, false)
 }
 
@@ -197,25 +211,52 @@ fn calculate_multiplier(slots: &[String]) -> f64 {
     let diamonds = slots.iter().filter(|slot| slot.as_str() == "💎").count() as i64;
     let money = slots.iter().filter(|slot| slot.as_str() == "💰").count() as i64;
     let rich = slots.iter().filter(|slot| slot.as_str() == "🤑").count() as i64;
+    let winning = diamonds + money + rich;
 
     if diamonds == 3 {
-        return 10.0;
+        return 8.0;
     }
 
     if money == 3 {
-        return 5.0;
+        return 4.0;
     }
 
     if rich == 3 {
-        return 2.5;
+        return 2.0;
     }
 
-    // Mixed odds for combinations containing only the 3 winning symbols.
-    if diamonds + money + rich == 3 {
-        return (diamonds as f64 * 10.0 + money as f64 * 5.0 + rich as f64 * 2.5) / 3.0;
+    if winning == 3 {
+        return 0.75;
+    }
+
+    if winning == 2 {
+        return 0.35;
+    }
+
+    if winning == 1 {
+        return 0.20;
     }
 
     0.0
+}
+
+fn rare_quartet_bonus(slots: &[Vec<String>], total_aposta: i64) -> Option<(String, i64)> {
+    if slots.len() != 4 {
+        return None;
+    }
+
+    let first_line = slots.first()?;
+
+    if !slots.iter().all(|line| line == first_line) {
+        return None;
+    }
+
+    let has_winning_symbol = first_line.iter().any(|slot| matches!(slot.as_str(), "💎" | "💰" | "🤑"));
+    if !has_winning_symbol {
+        return None;
+    }
+
+    Some(("Quarteto dos Amigos".to_string(), (total_aposta as f64 * 2.0).floor() as i64))
 }
 
 fn render_slots_table(slots: &[Vec<String>]) -> String {

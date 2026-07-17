@@ -461,16 +461,24 @@ fn build_error_embed(current_card: Card, aposta: i64, streak: i64, message: &str
 }
 
 fn shuffled_deck() -> Vec<Card> {
-    let mut deck = Vec::with_capacity(52);
+    let mut rng = rand::rng();
+    let mut suits = Suit::all();
+    suits.shuffle(&mut rng);
 
-    for suit in Suit::all() {
-        for rank in 1..=13 {
-            deck.push(Card { rank, suit });
+    let mut deck = Vec::with_capacity(52);
+    let mut order = 0;
+
+    for suit in suits {
+        let mut ranks: Vec<i64> = (1..=13).collect();
+        ranks.shuffle(&mut rng);
+
+        for rank in ranks {
+            deck.push(Card { rank, suit, order });
+            order += 1;
         }
     }
 
-    let mut rng = rand::rng();
-    deck.shuffle(&mut rng);
+    deck.reverse();
     deck
 }
 
@@ -501,6 +509,7 @@ fn card_rank(value: i64) -> &'static str {
 struct Card {
     rank: i64,
     suit: Suit,
+    order: i64,
 }
 
 #[derive(Clone, Copy)]
@@ -525,22 +534,10 @@ impl Suit {
         }
     }
 
-    // Order requested by game rules: ouros < espadas < copas < paus.
-    fn strength(self) -> i64 {
-        match self {
-            Suit::Diamonds => 1,
-            Suit::Spades => 2,
-            Suit::Hearts => 3,
-            Suit::Clubs => 4,
-        }
-    }
 }
 
 fn compare_cards(left: Card, right: Card) -> Ordering {
-    left
-        .rank
-        .cmp(&right.rank)
-        .then_with(|| left.suit.strength().cmp(&right.suit.strength()))
+    left.order.cmp(&right.order)
 }
 
 fn card_text(card: Card) -> String {
