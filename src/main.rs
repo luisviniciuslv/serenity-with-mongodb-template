@@ -6,6 +6,7 @@ use std::env;
 
 use poise::serenity_prelude::*;
 use poise::{Framework, FrameworkOptions, PrefixFrameworkOptions};
+use tracing_subscriber::{EnvFilter, fmt};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -17,6 +18,14 @@ pub mod events;
 
 #[tokio::main]
 async fn main() {
+    // Inicializa o subscriber de logs.
+    // O filtro padrão suprime o warning benigno do serenity sobre JSON decode
+    // em respostas vazias do Discord (rate limit / 204 No Content).
+    // Para ver todos os logs use: RUST_LOG=debug cargo run
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,serenity=warn"));
+    fmt().with_env_filter(filter).init();
+
     db::init().await.expect("Failed to connect to database");
 
     dotenv::dotenv().expect("Failed to load .env file");

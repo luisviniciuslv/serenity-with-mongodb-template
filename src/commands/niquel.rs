@@ -370,7 +370,7 @@ pub async fn niquel(
         if giros == 1 {
             // Giro único: animação coluna por coluna completa
             for col in 0..5usize {
-                tokio::time::sleep(Duration::from_millis(1100)).await;
+                tokio::time::sleep(Duration::from_millis(1300)).await;
                 let partial: Vec<Vec<String>> = (0..3)
                     .map(|row| {
                         (0..5)
@@ -702,7 +702,7 @@ async fn run_free_spins(
 
         // ── Reveal coluna por coluna ───────────────────────────────────────────
         for col in 0..5usize {
-            tokio::time::sleep(Duration::from_millis(700)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
 
             let display_grid: Vec<Vec<String>> = (0..3)
                 .map(|row| {
