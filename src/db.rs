@@ -261,7 +261,21 @@ pub async fn get_all_users() -> Result<Vec<UserModel>> {
 
     let mut cursor = user_collection.find(doc! {}).await?;
     while let Some(doc) = cursor.try_next().await? {
-        let user: UserModel = from_document(doc)?;
+        let mut user: UserModel = from_document(doc)?;
+        
+        if user.total_won == 0 && user.total_lost == 0 && user.wins == 0 && user.losses == 0 && !user.bets.is_empty() {
+            for bet in &user.bets {
+                if bet.result == "vitoria" {
+                    user.total_won += bet.value;
+                    user.wins += 1;
+                } else if bet.result == "derrota" {
+                    user.total_lost += bet.value;
+                    user.losses += 1;
+                }
+            }
+            let _ = update_user(&user).await;
+        }
+        
         users.push(user);
     }
 

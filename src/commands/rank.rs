@@ -5,24 +5,10 @@ use crate::db::{get_all_users, get_user};
 use crate::{Context, Error};
 
 fn bet_stats(user: &crate::model::UserModel) -> (i64, i64, usize, usize) {
-    let mut total_won = 0;
-    let mut total_lost = 0;
-    let mut wins = 0usize;
-    let mut losses = 0usize;
-
-    for bet in &user.bets {
-        match bet.result.as_str() {
-            "vitoria" => {
-                total_won += bet.value;
-                wins += 1;
-            }
-            "derrota" => {
-                total_lost += bet.value;
-                losses += 1;
-            }
-            _ => {}
-        }
-    }
+    let total_won = user.total_won;
+    let total_lost = user.total_lost;
+    let wins = user.wins as usize;
+    let losses = user.losses as usize;
 
     (total_won, total_lost, wins, losses)
 }
@@ -124,16 +110,8 @@ pub async fn rank(
                 .title("🏆 Ranking de Vitórias")
                 .description(format!(
                     "Você tem **{}** vitória(s) e **{}** derrota(s).",
-                    user_db
-                        .bets
-                        .iter()
-                        .filter(|bet| bet.result == "vitoria")
-                        .count(),
-                    user_db
-                        .bets
-                        .iter()
-                        .filter(|bet| bet.result == "derrota")
-                        .count()
+                    user_db.wins,
+                    user_db.losses
                 ))
                 .colour(Colour::DARK_GREEN)
         } else if derrota_mode {
@@ -141,12 +119,7 @@ pub async fn rank(
                 .title("📉 Ranking de Derrotas")
                 .description(format!(
                     "Você perdeu **{}** coin(s) no total.",
-                    user_db
-                        .bets
-                        .iter()
-                        .filter(|bet| bet.result == "derrota")
-                        .map(|bet| bet.value)
-                        .sum::<i64>()
+                    user_db.total_lost
                 ))
                 .colour(Colour::DARK_RED)
     } else {
