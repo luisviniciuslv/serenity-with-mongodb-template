@@ -17,7 +17,8 @@ pub async fn empresas(ctx: Context<'_>) -> Result<(), Error> {
     let mut current_index: usize = 0;
 
     let user_db = get_user(&user_id).await?;
-    let (embed, components) = build_empresas_view(&user_db, &author.name, author.face(), current_index, None);
+    let (embed, components) =
+        build_empresas_view(&user_db, &author.name, author.face(), current_index, None);
 
     let reply = ctx
         .send(CreateReply {
@@ -92,7 +93,10 @@ fn build_empresas_view(
     status_message: Option<String>,
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
     let business = BUSINESSES[current_index];
-    let owned = user.businesses.iter().find(|item| item.name == business.name);
+    let owned = user
+        .businesses
+        .iter()
+        .find(|item| item.name == business.name);
 
     let (action_label, action_price, level_text, own_text) = if let Some(owned_business) = owned {
         (
@@ -115,7 +119,11 @@ fn build_empresas_view(
         .field("Nome", business.name, true)
         .field("Sua posse", own_text, true)
         .field("Level atual", level_text.to_string(), true)
-        .field("Reward base", format!("{} coin(s)/tick", business.reward), true)
+        .field(
+            "Reward base",
+            format!("{} coin(s)/tick", business.reward),
+            true,
+        )
         .field("Preco da acao", action_price.to_string(), true)
         .field("Seu saldo", user.coins.to_string(), true)
         .field("Acao", action_label, false)

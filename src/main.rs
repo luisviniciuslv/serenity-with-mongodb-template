@@ -19,7 +19,7 @@ pub mod events;
 async fn main() {
     db::init().await.expect("Failed to connect to database");
 
-    dotenv::dotenv().expect("Failed to load .env file");  
+    dotenv::dotenv().expect("Failed to load .env file");
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
     let mut client = Client::builder(token, intents_config())
@@ -94,7 +94,8 @@ async fn cleanup_guild_command_duplicates(
     ctx: &poise::serenity_prelude::Context,
     guild_id: GuildId,
 ) -> Result<(), Error> {
-    let existing_commands: Vec<poise::serenity_prelude::Command> = guild_id.get_commands(ctx).await?;
+    let existing_commands: Vec<poise::serenity_prelude::Command> =
+        guild_id.get_commands(ctx).await?;
     let duplicate_ids = find_duplicate_command_ids(&existing_commands);
 
     for command_id in duplicate_ids {
@@ -104,9 +105,7 @@ async fn cleanup_guild_command_duplicates(
     Ok(())
 }
 
-fn find_duplicate_command_ids(
-    commands: &[poise::serenity_prelude::Command],
-) -> Vec<CommandId> {
+fn find_duplicate_command_ids(commands: &[poise::serenity_prelude::Command]) -> Vec<CommandId> {
     let mut seen_names: HashMap<&str, CommandId> = HashMap::new();
     let mut duplicate_ids = Vec::new();
 
@@ -127,7 +126,10 @@ async fn register_missing_global_commands(
 ) -> Result<(), Error> {
     let existing_commands: Vec<poise::serenity_prelude::Command> =
         poise::serenity_prelude::Command::get_global_commands(ctx).await?;
-    let existing_names: HashSet<&str> = existing_commands.iter().map(|command| command.name.as_str()).collect();
+    let existing_names: HashSet<&str> = existing_commands
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect();
 
     for command in commands {
         if let Some(slash_command) = command.create_as_slash_command() {
@@ -145,8 +147,12 @@ async fn register_missing_guild_commands(
     commands: &[poise::Command<Data, Error>],
     guild_id: GuildId,
 ) -> Result<(), Error> {
-    let existing_commands: Vec<poise::serenity_prelude::Command> = guild_id.get_commands(ctx).await?;
-    let existing_names: HashSet<&str> = existing_commands.iter().map(|command| command.name.as_str()).collect();
+    let existing_commands: Vec<poise::serenity_prelude::Command> =
+        guild_id.get_commands(ctx).await?;
+    let existing_names: HashSet<&str> = existing_commands
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect();
 
     for command in commands {
         if let Some(slash_command) = command.create_as_slash_command() {

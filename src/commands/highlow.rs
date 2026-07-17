@@ -534,7 +534,6 @@ impl Suit {
             Suit::Spades => "♠",
         }
     }
-
 }
 
 fn compare_cards(left: Card, right: Card) -> Ordering {

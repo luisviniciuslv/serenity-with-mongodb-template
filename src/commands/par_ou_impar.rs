@@ -77,7 +77,11 @@ async fn run_bet_command(
             .title("❌ Erro")
             .color(Colour::RED)
             .description("Valor de aposta inválido.");
-        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        ctx.send(CreateReply {
+            embeds: vec![embed],
+            ..Default::default()
+        })
+        .await?;
         return Ok(());
     }
 
@@ -86,7 +90,11 @@ async fn run_bet_command(
             .title("❌ Saldo Insuficiente")
             .color(Colour::RED)
             .description("Você não tem coins suficientes para realizar esta aposta.");
-        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        ctx.send(CreateReply {
+            embeds: vec![embed],
+            ..Default::default()
+        })
+        .await?;
         return Ok(());
     }
 
@@ -95,7 +103,11 @@ async fn run_bet_command(
             .title("❌ Erro")
             .color(Colour::RED)
             .description("Escolha inválida. Use apenas `par` ou `impar`.");
-        ctx.send(CreateReply { embeds: vec![embed], ..Default::default() }).await?;
+        ctx.send(CreateReply {
+            embeds: vec![embed],
+            ..Default::default()
+        })
+        .await?;
         return Ok(());
     }
 

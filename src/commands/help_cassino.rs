@@ -7,7 +7,9 @@ use crate::{Context, Error};
 #[poise::command(slash_command, prefix_command, rename = "help")]
 pub async fn help_cassino(
     ctx: Context<'_>,
-    #[description = "Tópico: niquel, highlow, poi (ou vazio para visão geral)"] topico: Option<String>,
+    #[description = "Tópico: niquel, highlow, poi (ou vazio para visão geral)"] topico: Option<
+        String,
+    >,
 ) -> Result<(), Error> {
     let topico = topico.unwrap_or_default().to_lowercase();
 
@@ -65,7 +67,9 @@ fn embed_geral() -> CreateEmbed {
              Use `!rec` para ganhar coins gratuitos todos os dias.",
             false,
         )
-        .footer(CreateEmbedFooter::new("!help niquel  |  !help highlow  |  !help poi"))
+        .footer(CreateEmbedFooter::new(
+            "!help niquel  |  !help highlow  |  !help poi",
+        ))
 }
 
 // ─── Embed Caça-Níquel ────────────────────────────────────────────────────────

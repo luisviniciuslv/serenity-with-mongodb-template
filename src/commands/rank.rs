@@ -1,7 +1,7 @@
 use poise::serenity_prelude::{Colour, CreateEmbed};
 use poise::CreateReply;
 
-use crate::db::{get_user, get_all_users};
+use crate::db::{get_all_users, get_user};
 use crate::{Context, Error};
 
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
@@ -14,7 +14,10 @@ pub async fn rank(
 
     let mut users = get_all_users().await?;
     let empresas_mode = matches!(
-        modo.as_deref().map(str::trim).map(str::to_lowercase).as_deref(),
+        modo.as_deref()
+            .map(str::trim)
+            .map(str::to_lowercase)
+            .as_deref(),
         Some("empresas")
     );
 
@@ -39,16 +42,17 @@ pub async fn rank(
             .description(format!(
                 "Você tem **{}** empresa(s) com **{}** nível(is) total.",
                 user_db.businesses.len(),
-                user_db.businesses.iter().map(|business| business.level).sum::<i64>()
+                user_db
+                    .businesses
+                    .iter()
+                    .map(|business| business.level)
+                    .sum::<i64>()
             ))
             .colour(Colour::DARK_GREEN)
     } else {
         CreateEmbed::new()
             .title("🏆 Ranking de Coins")
-            .description(format!(
-                "Você tem **{}** coin(s).",
-                user_db.coins
-            ))
+            .description(format!("Você tem **{}** coin(s).", user_db.coins))
             .colour(Colour::GOLD)
     };
 
@@ -82,7 +86,7 @@ pub async fn rank(
             );
         }
     }
-    
+
     ctx.send(CreateReply {
         embeds: vec![embed],
         ..Default::default()

@@ -33,12 +33,14 @@ pub async fn duelo(
     let alvo_user = get_user(&alvo.id.to_string()).await?;
 
     if desafiante_user.coins < aposta {
-        ctx.say("Você não tem coins suficientes para essa aposta.").await?;
+        ctx.say("Você não tem coins suficientes para essa aposta.")
+            .await?;
         return Ok(());
     }
 
     if alvo_user.coins < aposta {
-        ctx.say("O membro desafiado não tem coins suficientes para essa aposta.").await?;
+        ctx.say("O membro desafiado não tem coins suficientes para essa aposta.")
+            .await?;
         return Ok(());
     }
 
@@ -73,10 +75,7 @@ pub async fn duelo(
         message
             .reply(
                 ctx.serenity_context(),
-                format!(
-                    "Duelo cancelado: {} não aceitou a tempo.",
-                    alvo.mention()
-                ),
+                format!("Duelo cancelado: {} não aceitou a tempo.", alvo.mention()),
             )
             .await?;
         return Ok(());
@@ -97,8 +96,16 @@ pub async fn duelo(
     }
 
     let winner_is_challenger: bool = rand::random();
-    let winner = if winner_is_challenger { &desafiante } else { &alvo };
-    let loser = if winner_is_challenger { &alvo } else { &desafiante };
+    let winner = if winner_is_challenger {
+        &desafiante
+    } else {
+        &alvo
+    };
+    let loser = if winner_is_challenger {
+        &alvo
+    } else {
+        &desafiante
+    };
 
     update_coins(&desafiante.id.to_string(), -aposta).await?;
     update_coins(&alvo.id.to_string(), -aposta).await?;

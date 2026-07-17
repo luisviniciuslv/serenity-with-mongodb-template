@@ -1,13 +1,13 @@
+pub mod adm;
+pub mod duelo;
+pub mod empresas;
+pub mod help_cassino;
+pub mod highlow;
+pub mod niquel;
 pub mod par_ou_impar;
 pub mod profile;
-pub mod adm;
-pub mod rec;
-pub mod empresas;
-pub mod niquel;
-pub mod duelo;
-pub mod highlow;
 pub mod rank;
-pub mod help_cassino;
+pub mod rec;
 
 use poise::Command;
 

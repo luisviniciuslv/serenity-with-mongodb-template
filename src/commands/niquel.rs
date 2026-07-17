@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use poise::serenity_prelude::{
-    ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed,
-    CreateInteractionResponse, CreateInteractionResponseMessage, EditMessage,
+    ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed, CreateInteractionResponse,
+    CreateInteractionResponseMessage, EditMessage,
 };
 use poise::CreateReply;
 
@@ -15,17 +15,17 @@ const WILD: &str = "🃏";
 
 // (símbolo, peso) — maior peso = aparece mais frequentemente
 const WEIGHTED_SYMBOLS: &[(&str, u32)] = &[
-    ("🍒", 22), // Cherry       — muito comum
-    ("🔔", 19), // Bell         — comum
-    ("🍋", 17), // Lemon        — comum
-    ("🍊", 14), // Orange       — moderado
-    ("🍉", 12), // Watermelon   — moderado
-    ("🐒",  9), // Monkey       — incomum
-    ("🍀",  6), // Clover       — incomum
-    ("💰",  5), // Moneybag     — raro
-    ("👑",  2), // Crown        — muito raro
-    ("💎",  1), // Diamond      — LENDÁRIO
-    (WILD,   3), // Wild         — especial
+    ("🍒", 22),   // Cherry       — muito comum
+    ("🔔", 19),   // Bell         — comum
+    ("🍋", 17),   // Lemon        — comum
+    ("🍊", 14),   // Orange       — moderado
+    ("🍉", 12),   // Watermelon   — moderado
+    ("🐒", 9),    // Monkey       — incomum
+    ("🍀", 6),    // Clover       — incomum
+    ("💰", 5),    // Moneybag     — raro
+    ("👑", 2),    // Crown        — muito raro
+    ("💎", 1),    // Diamond      — LENDÁRIO
+    (WILD, 3),    // Wild         — especial
     (SCATTER, 3), // Scatter     — especial
 ];
 
@@ -172,17 +172,72 @@ fn calculate_line(grid: &[Vec<String>], payline_idx: usize) -> Option<LineResult
 // ─── Tabela de multiplicadores ────────────────────────────────────────────────
 fn get_symbol_multiplier(symbol: &str, count: usize) -> f64 {
     match symbol {
-        "💎" => match count { 5 => 200.0, 4 => 50.0, 3 => 10.0, _ => 0.0 },
-        "👑" => match count { 5 => 150.0, 4 => 35.0, 3 => 7.0,  _ => 0.0 },
-        "💰" => match count { 5 => 100.0, 4 => 25.0, 3 => 5.0,  _ => 0.0 },
-        "🍀" => match count { 5 => 60.0,  4 => 18.0, 3 => 4.5,  _ => 0.0 },
-        "🐒" => match count { 5 => 50.0,  4 => 15.0, 3 => 4.0,  _ => 0.0 },
-        "🍉" => match count { 5 => 25.0,  4 => 10.0, 3 => 3.0,  _ => 0.0 },
-        "🍊" => match count { 5 => 20.0,  4 => 8.0,  3 => 2.0,  _ => 0.0 },
-        "🍋" => match count { 5 => 15.0,  4 => 6.0,  3 => 1.5,  _ => 0.0 },
-        "🔔" => match count { 5 => 12.0,  4 => 5.0,  3 => 1.2,  _ => 0.0 },
-        "🍒" => match count { 5 => 10.0,  4 => 4.0,  3 => 1.0,  _ => 0.0 },
-        WILD  => match count { 5 => 200.0, 4 => 50.0, 3 => 10.0, _ => 0.0 },
+        "💎" => match count {
+            5 => 200.0,
+            4 => 50.0,
+            3 => 10.0,
+            _ => 0.0,
+        },
+        "👑" => match count {
+            5 => 150.0,
+            4 => 35.0,
+            3 => 7.0,
+            _ => 0.0,
+        },
+        "💰" => match count {
+            5 => 100.0,
+            4 => 25.0,
+            3 => 5.0,
+            _ => 0.0,
+        },
+        "🍀" => match count {
+            5 => 60.0,
+            4 => 18.0,
+            3 => 4.5,
+            _ => 0.0,
+        },
+        "🐒" => match count {
+            5 => 50.0,
+            4 => 15.0,
+            3 => 4.0,
+            _ => 0.0,
+        },
+        "🍉" => match count {
+            5 => 25.0,
+            4 => 10.0,
+            3 => 3.0,
+            _ => 0.0,
+        },
+        "🍊" => match count {
+            5 => 20.0,
+            4 => 8.0,
+            3 => 2.0,
+            _ => 0.0,
+        },
+        "🍋" => match count {
+            5 => 15.0,
+            4 => 6.0,
+            3 => 1.5,
+            _ => 0.0,
+        },
+        "🔔" => match count {
+            5 => 12.0,
+            4 => 5.0,
+            3 => 1.2,
+            _ => 0.0,
+        },
+        "🍒" => match count {
+            5 => 10.0,
+            4 => 4.0,
+            3 => 1.0,
+            _ => 0.0,
+        },
+        WILD => match count {
+            5 => 200.0,
+            4 => 50.0,
+            3 => 10.0,
+            _ => 0.0,
+        },
         _ => 0.0,
     }
 }
@@ -255,7 +310,9 @@ pub async fn niquel(
     let grid = spin_grid();
     let result = evaluate_spin(&grid, aposta_por_linha);
     let saldo_final = if result.payout > 0 {
-        update_coins(&user.id.to_string(), result.payout).await?.coins
+        update_coins(&user.id.to_string(), result.payout)
+            .await?
+            .coins
     } else {
         get_user(&user.id.to_string()).await?.coins
     };
@@ -328,11 +385,11 @@ pub async fn niquel(
     );
 
     let components = if has_free_spins {
-        vec![CreateActionRow::Buttons(vec![
-            CreateButton::new(BTN_FREE_SPIN)
-                .label(format!("🎁 Usar {} Free Spins!", result.free_spins))
-                .style(ButtonStyle::Success),
-        ])]
+        vec![CreateActionRow::Buttons(vec![CreateButton::new(
+            BTN_FREE_SPIN,
+        )
+        .label(format!("🎁 Usar {} Free Spins!", result.free_spins))
+        .style(ButtonStyle::Success)])]
     } else {
         vec![]
     };
@@ -383,9 +440,7 @@ pub async fn niquel(
             let _ = message
                 .edit(
                     ctx.serenity_context(),
-                    EditMessage::new()
-                        .embed(result_embed)
-                        .components(vec![]),
+                    EditMessage::new().embed(result_embed).components(vec![]),
                 )
                 .await;
         }
@@ -437,7 +492,11 @@ async fn run_free_spins(
                         .field("Aposta por linha", format!("{} coins", aposta), true)
                         .field("Aposta total", format!("{} coins", total_aposta), true)
                         .field("Status", "🎲 Girando... (GRÁTIS!)", true)
-                        .field("Total ganho até agora", format!("{} coins", total_ganho), true),
+                        .field(
+                            "Total ganho até agora",
+                            format!("{} coins", total_ganho),
+                            true,
+                        ),
                 ),
             )
             .await;
@@ -471,7 +530,11 @@ async fn run_free_spins(
                 .field("Aposta por linha", format!("{} coins", aposta), true)
                 .field("Aposta total", format!("{} coins", total_aposta), true)
                 .field("Status", format!("Revelando {}/5...", col + 1), true)
-                .field("Total ganho até agora", format!("{} coins", total_ganho), true);
+                .field(
+                    "Total ganho até agora",
+                    format!("{} coins", total_ganho),
+                    true,
+                );
 
             let _ = message
                 .edit(
@@ -534,7 +597,11 @@ async fn run_free_spins(
             spin_num, total_ganho
         ))
         .field("Free Spins Jogados", spin_num.to_string(), true)
-        .field("Total Spins Concedidos", total_spins_awarded.to_string(), true)
+        .field(
+            "Total Spins Concedidos",
+            total_spins_awarded.to_string(),
+            true,
+        )
         .field("Total Ganho", format!("{} coins", total_ganho), true)
         .field("Saldo Atual", format!("{} coins", saldo_atual), true);
 
@@ -645,7 +712,11 @@ fn build_result_embed(
     CreateEmbed::new()
         .title(format!("{} • Resultado ({})", title_prefix, user_name))
         .thumbnail(user_image_url)
-        .color(if won { Colour::DARK_GREEN } else { Colour::DARK_RED })
+        .color(if won {
+            Colour::DARK_GREEN
+        } else {
+            Colour::DARK_RED
+        })
         .description(render_grid(&result.grid))
         .field("Aposta Total", format!("{} coins", total_aposta), true)
         .field("Pagamento Total", format!("{} coins", result.payout), true)
