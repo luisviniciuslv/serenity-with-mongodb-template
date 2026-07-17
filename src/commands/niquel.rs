@@ -107,17 +107,18 @@ fn evaluate_spin(grid: &[Vec<String>], aposta_total: i64) -> SpinResult {
         .filter(|s| s.as_str() == SCATTER)
         .count();
 
-    let scatter_payout = scatter_bonus(scatter_count, aposta_total);
+    // scatter_bonus espera aposta_por_linha pois internamente já faz × NUM_PAYLINES
+    let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
+    let scatter_payout = scatter_bonus(scatter_count, aposta_por_linha);
     let free_spins = free_spins_from_scatter(scatter_count);
 
-    // Cada linha paga proporcionalmente à aposta total (aposta_total / NUM_PAYLINES)
-    // para que os multiplicadores façam sentido em relação ao valor apostado.
-    let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
-
+    // Cada linha vencedora paga multiplicador × aposta_total:
+    // assim 1.0× devolve exatamente o que foi apostado, 5.0× = lucro de 5×, etc.
+    // Múltiplas linhas somam — spins com várias linhas vencedoras criam jackpots naturais.
     let mut line_results: Vec<(usize, LineResult)> = Vec::new();
     for i in 0..PAYLINES.len() {
         if let Some(mut result) = calculate_line(grid, i) {
-            result.payout = ((aposta_por_linha as f64) * result.multiplier).floor() as i64;
+            result.payout = ((aposta_total as f64) * result.multiplier).floor() as i64;
             line_results.push((i, result));
         }
     }
@@ -430,7 +431,6 @@ pub async fn niquel(
                 &ctx,
                 &mut message,
                 total_aposta,
-                total_aposta,
                 free_spins_total,
                 &user.id.to_string(),
                 &user.name,
@@ -456,7 +456,6 @@ pub async fn niquel(
 async fn run_free_spins(
     ctx: &Context<'_>,
     message: &mut poise::serenity_prelude::Message,
-    aposta: i64,
     total_aposta: i64,
     num_spins: u32,
     user_id: &str,
@@ -466,7 +465,6 @@ async fn run_free_spins(
     let mut total_ganho: i64 = 0;
     let mut saldo_atual = get_user(user_id).await?.coins;
 
-    // BUG #2 FIX: usa while loop para suportar re-trigger de free spins
     let mut remaining_spins = num_spins;
     let mut total_spins_awarded = num_spins;
     let mut spin_num = 0u32;
@@ -477,7 +475,7 @@ async fn run_free_spins(
 
         let grid = spin_grid();
 
-        // BUG #1 FIX: estado inicial todo "?" separado do loop de reveal
+        // ── Frame inicial: grade toda "?" ──────────────────────────────────────
         tokio::time::sleep(Duration::from_millis(800)).await;
         let _ = message
             .edit(
@@ -485,25 +483,22 @@ async fn run_free_spins(
                 EditMessage::new().embed(
                     CreateEmbed::new()
                         .title(format!(
-                            "🆓 Free Spin {}/{} • {}",
+                            "🆓 Free Spin {}/{} • {} 🎲",
                             spin_num, total_spins_awarded, user_name
                         ))
                         .thumbnail(user_image_url)
                         .color(Colour::GOLD)
                         .description(render_grid(&vec![vec!["?".to_string(); 5]; 3]))
-                        .field("Aposta por linha", format!("{} coins", aposta), true)
-                        .field("Aposta total", format!("{} coins", total_aposta), true)
-                        .field("Status", "🎲 Girando... (GRÁTIS!)", true)
-                        .field(
-                            "Total ganho até agora",
-                            format!("{} coins", total_ganho),
-                            true,
-                        ),
+                        .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
+                        .field("Spins Restantes", format!("{}", remaining_spins), true)
+                        .field("Saldo Atual", format!("{} coins", saldo_atual), true)
+                        .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
+                        .field("Status", "🎲 Girando... (GRÁTIS!)", false),
                 ),
             )
             .await;
 
-        // Revela coluna por coluna (5 iterações exatas, sem frame fantasma)
+        // ── Reveal coluna por coluna ───────────────────────────────────────────
         for col in 0..5usize {
             tokio::time::sleep(Duration::from_millis(700)).await;
 
@@ -521,64 +516,93 @@ async fn run_free_spins(
                 })
                 .collect();
 
-            let partial_embed = CreateEmbed::new()
-                .title(format!(
-                    "🆓 Free Spin {}/{} • {}",
-                    spin_num, total_spins_awarded, user_name
-                ))
-                .thumbnail(user_image_url)
-                .color(Colour::GOLD)
-                .description(render_grid(&display_grid))
-                .field("Aposta por linha", format!("{} coins", aposta), true)
-                .field("Aposta total", format!("{} coins", total_aposta), true)
-                .field("Status", format!("Revelando {}/5...", col + 1), true)
-                .field(
-                    "Total ganho até agora",
-                    format!("{} coins", total_ganho),
-                    true,
-                );
-
             let _ = message
                 .edit(
                     ctx.serenity_context(),
-                    EditMessage::new().embed(partial_embed),
+                    EditMessage::new().embed(
+                        CreateEmbed::new()
+                            .title(format!(
+                                "🆓 Free Spin {}/{} • {} 🎲",
+                                spin_num, total_spins_awarded, user_name
+                            ))
+                            .thumbnail(user_image_url)
+                            .color(Colour::GOLD)
+                            .description(render_grid(&display_grid))
+                            .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
+                            .field("Spins Restantes", format!("{}", remaining_spins), true)
+                            .field("Saldo Atual", format!("{} coins", saldo_atual), true)
+                            .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
+                            .field("Status", format!("Revelando coluna {}/5...", col + 1), false),
+                    ),
                 )
                 .await;
         }
 
+        // ── Avalia resultado ───────────────────────────────────────────────────
         let result = evaluate_spin(&grid, total_aposta);
         if result.payout > 0 {
             saldo_atual = update_coins(user_id, result.payout).await?.coins;
             total_ganho += result.payout;
         }
 
-        // BUG #2 FIX: re-trigger de free spins quando scatter aparece durante free spins
+        // Re-trigger de free spins se scatter aparecer
         if result.free_spins > 0 {
             remaining_spins += result.free_spins;
             total_spins_awarded += result.free_spins;
         }
 
-        let title = if result.free_spins > 0 {
-            format!(
-                "🆓 Free Spin {}/{} • Resultado ({}) ✨ +{} spins!",
-                spin_num, total_spins_awarded, user_name, result.free_spins
-            )
+        // ── Embed de resultado do spin individual ──────────────────────────────
+        let won = result.payout > 0;
+
+        let mut detalhes = String::new();
+        if result.scatter_count >= 3 {
+            let fs_txt = if result.free_spins > 0 {
+                format!(" + **{}** free spins!", result.free_spins)
+            } else {
+                String::new()
+            };
+            detalhes.push_str(&format!(
+                "⭐ **Scatter ×{}** → **{}** coins{}\n",
+                result.scatter_count, result.scatter_payout, fs_txt
+            ));
+        }
+        if result.line_results.is_empty() && result.scatter_count < 3 {
+            detalhes.push_str("Nenhuma linha premiada.");
         } else {
-            format!(
-                "🆓 Free Spin {}/{} • Resultado ({})",
-                spin_num, total_spins_awarded, user_name
-            )
+            for (idx, r) in &result.line_results {
+                detalhes.push_str(&format!(
+                    "**L{}**: {}×{} ({:.2}×) = **{}** coins\n",
+                    idx + 1, r.count, r.symbol, r.multiplier, r.payout
+                ));
+            }
+        }
+
+        let retrigger_tag = if result.free_spins > 0 {
+            format!(" ✨ +{} spins!", result.free_spins)
+        } else {
+            String::new()
+        };
+        let spin_status = if won {
+            format!("🎉 Ganhou **{}** coins neste spin!", result.payout)
+        } else {
+            "😔 Sem prêmio neste spin.".to_string()
         };
 
-        let spin_embed = build_result_embed(
-            &result,
-            total_aposta,
-            saldo_atual,
-            user_name,
-            user_image_url,
-            true,
-        )
-        .title(title);
+        let spin_embed = CreateEmbed::new()
+            .title(format!(
+                "🆓 Free Spin {}/{} • Resultado ({}){}",
+                spin_num, total_spins_awarded, user_name, retrigger_tag
+            ))
+            .thumbnail(user_image_url)
+            .color(if won { Colour::DARK_GREEN } else { Colour::DARK_GOLD })
+            .description(render_grid(&result.grid))
+            .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
+            .field("Pagamento", format!("{} coins", result.payout), true)
+            .field("Saldo Atual", format!("{} coins", saldo_atual), true)
+            .field("Spins Restantes", format!("{}", remaining_spins), true)
+            .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
+            .field("Status", spin_status, false)
+            .field("Detalhes", detalhes, false);
 
         let _ = message
             .edit(ctx.serenity_context(), EditMessage::new().embed(spin_embed))
@@ -589,23 +613,30 @@ async fn run_free_spins(
         }
     }
 
-    // Resumo final dos free spins
+    // ── Resumo final da sessão de free spins ───────────────────────────────────
+    let net = total_ganho as i64;
+    let net_text = if net > 0 {
+        format!("🎉 Lucro de **{}** coins!", net)
+    } else if net == 0 {
+        "Empatou — sem lucro nem prejuízo.".to_string()
+    } else {
+        format!("Prejuízo de **{}** coins.", -net)
+    };
+
     let summary_embed = CreateEmbed::new()
         .title(format!("🎰 Free Spins Concluídos! • {}", user_name))
         .thumbnail(user_image_url)
-        .color(Colour::DARK_GREEN)
+        .color(if total_ganho > 0 { Colour::DARK_GREEN } else { Colour::DARK_RED })
         .description(format!(
-            "Você completou **{}** free spin(s) e ganhou **{}** coins no total! 🎉",
-            spin_num, total_ganho
+            "Sessão de free spins encerrada! Você jogou **{}** spin(s) grátis.",
+            spin_num
         ))
         .field("Free Spins Jogados", spin_num.to_string(), true)
-        .field(
-            "Total Spins Concedidos",
-            total_spins_awarded.to_string(),
-            true,
-        )
-        .field("Total Ganho", format!("{} coins", total_ganho), true)
-        .field("Saldo Atual", format!("{} coins", saldo_atual), true);
+        .field("Total Spins Concedidos", total_spins_awarded.to_string(), true)
+        .field("Aposta por Spin", format!("{} coins", total_aposta), true)
+        .field("💰 Total Ganho", format!("{} coins", total_ganho), true)
+        .field("Saldo Final", format!("{} coins", saldo_atual), true)
+        .field("Resultado da Sessão", net_text, false);
 
     let _ = message
         .edit(
