@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::time::Duration;
 
 use poise::serenity_prelude::{
-    ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed, CreateInteractionResponse,
-    CreateInteractionResponseMessage,
+    ButtonStyle, Colour, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor,
+    CreateInteractionResponse, CreateInteractionResponseMessage,
 };
 use poise::CreateReply;
 use rand::seq::SliceRandom;
@@ -54,6 +54,11 @@ pub async fn highlow(
     let saldo_apos_aposta = update_coins(&user_id, -aposta).await?.coins;
     let mut first_round_pending = true;
 
+    let author_info = AuthorInfo {
+        name: user.display_name().to_string(),
+        avatar_url: user.avatar_url().or_else(|| Some(user.default_avatar_url())),
+    };
+
     let mut deck = shuffled_deck();
     let mut current_card = draw_card(&mut deck).expect("Deck should start with cards");
     let mut streak = user_db.highlow_streak;
@@ -65,6 +70,7 @@ pub async fn highlow(
                 aposta,
                 streak,
                 saldo_apos_aposta,
+                &author_info,
             )],
             components: Some(default_components()),
             ..Default::default()
@@ -81,14 +87,14 @@ pub async fn highlow(
             .await;
 
         let Some(interaction) = interaction else {
-            interaction_timeout_update(&ctx, &mut message, current_card, aposta, streak).await?;
+            interaction_timeout_update(&ctx, &mut message, current_card, aposta, streak, &author_info).await?;
             break;
         };
 
         let action_id = interaction.data.custom_id.as_str();
 
         if action_id == BTN_CASHOUT {
-            process_cashout(&ctx, &interaction, &user_id, current_card, aposta, streak).await?;
+            process_cashout(&ctx, &interaction, &user_id, current_card, aposta, streak, &author_info).await?;
             break;
         }
 
@@ -111,7 +117,7 @@ pub async fn highlow(
         }
 
         let Some(next_card) = draw_card(&mut deck) else {
-            process_deck_exhausted(&ctx, &interaction, &user_id, current_card, aposta, streak)
+            process_deck_exhausted(&ctx, &interaction, &user_id, current_card, aposta, streak, &author_info)
                 .await?;
             break;
         };
@@ -128,6 +134,7 @@ pub async fn highlow(
                 next_card,
                 aposta,
                 streak,
+                &author_info,
             )
             .await?;
         } else {
@@ -138,6 +145,7 @@ pub async fn highlow(
                 current_card,
                 next_card,
                 aposta,
+                streak,
             )
             .await?;
             break;
@@ -147,12 +155,28 @@ pub async fn highlow(
     Ok(())
 }
 
+struct AuthorInfo {
+    name: String,
+    avatar_url: Option<String>,
+}
+
+impl AuthorInfo {
+    fn to_embed_author(&self) -> CreateEmbedAuthor {
+        let mut a = CreateEmbedAuthor::new(&self.name);
+        if let Some(url) = &self.avatar_url {
+            a = a.icon_url(url);
+        }
+        a
+    }
+}
+
 async fn interaction_timeout_update(
     ctx: &Context<'_>,
     message: &mut poise::serenity_prelude::Message,
     current_card: Card,
     aposta: i64,
     streak: i64,
+    author_info: &AuthorInfo,
 ) -> Result<(), Error> {
     message
         .edit(
@@ -163,6 +187,7 @@ async fn interaction_timeout_update(
                     aposta,
                     streak,
                     "Tempo esgotado. Comando encerrado.",
+                    author_info,
                 ))
                 .components(vec![]),
         )
@@ -178,13 +203,14 @@ async fn process_cashout(
     current_card: Card,
     aposta: i64,
     streak: i64,
+    author_info: &AuthorInfo,
 ) -> Result<(), Error> {
     let (bonus, saldo_atual) = settle_streak_reset(user_id, aposta, streak).await?;
 
     respond_with_embed(
         ctx,
         interaction,
-        build_cashout_embed(current_card, aposta, streak, bonus, saldo_atual),
+        build_cashout_embed(current_card, aposta, streak, bonus, saldo_atual, author_info),
         vec![],
     )
     .await?;
@@ -214,13 +240,14 @@ async fn process_deck_exhausted(
     current_card: Card,
     aposta: i64,
     streak: i64,
+    author_info: &AuthorInfo,
 ) -> Result<(), Error> {
     let (bonus, saldo_atual) = settle_streak_reset(user_id, aposta, streak).await?;
 
     respond_with_embed(
         ctx,
         interaction,
-        build_deck_exhausted_embed(current_card, aposta, streak, bonus, saldo_atual),
+        build_deck_exhausted_embed(current_card, aposta, streak, bonus, saldo_atual, author_info),
         vec![],
     )
     .await?;
@@ -245,6 +272,7 @@ async fn process_round_win(
     next_card: Card,
     aposta: i64,
     streak: i64,
+    author_info: &AuthorInfo,
 ) -> Result<i64, Error> {
     let next_streak = streak + 1;
     set_highlow_streak(user_id, next_streak).await?;
@@ -265,6 +293,7 @@ async fn process_round_win(
             multiplier,
             payout,
             fresh_user.coins,
+            author_info,
         ),
         default_components(),
     )
@@ -280,6 +309,7 @@ async fn process_round_loss(
     current_card: Card,
     next_card: Card,
     aposta: i64,
+    streak: i64,
 ) -> Result<(), Error> {
     set_highlow_streak(user_id, 0).await?;
     let _ = record_bet(user_id, "highlow", aposta, false).await?;
@@ -288,7 +318,7 @@ async fn process_round_loss(
     respond_with_embed(
         ctx,
         interaction,
-        build_loss_embed(current_card, next_card, aposta, updated_user.coins),
+        build_loss_embed(current_card, next_card, aposta, streak, updated_user.coins),
         vec![],
     )
     .await?;
@@ -353,9 +383,11 @@ fn build_waiting_embed(
     aposta: i64,
     streak: i64,
     saldo_atual: i64,
+    author_info: &AuthorInfo,
 ) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
+        .author(author_info.to_embed_author())
         .color(Colour::DARK_BLUE)
         .description(format!(
             "Carta atual:\n{}\n\nAposta por rodada: **{}**\nStreak atual: **{}**\nSaldo atual: **{}** coin(s)\nBônus de saque agora: **{}** coin(s)\n\nClique em **Maior** se acha que a próxima carta será maior.\nClique em **Menor** se acha que a próxima carta será menor.",
@@ -375,40 +407,55 @@ fn build_win_embed(
     multiplier: f64,
     payout: i64,
     saldo_atual: i64,
+    author_info: &AuthorInfo,
 ) -> CreateEmbed {
+    let lucro = payout - aposta;
+    let cashout_now = cashout_bonus(aposta, streak);
     CreateEmbed::new()
-        .title("HighLow • Acertou")
+        .title("🟢 HighLow • Acertou!")
+        .author(author_info.to_embed_author())
         .color(Colour::DARK_GREEN)
         .description(format!(
-            "Carta anterior:\n{}\nNova carta:\n{}\n\nVocê venceu esta rodada!\nAposta: **{}**\nMultiplicador da streak: **{:.2}x**\nPagamento: **{}**\nSaldo atual: **{}** coin(s)",
+            "Carta anterior:\n{}\nNova carta:\n{}",
             card_text(previous_card),
             card_text(revealed_card),
-            aposta,
-            multiplier,
-            payout,
-            saldo_atual
         ))
-        .field("Streak", streak.to_string(), true)
-        .field("Saque agora", cashout_bonus(aposta, streak).to_string(), true)
-        .field("Próxima jogada", "Escolha Maior ou Menor novamente.", true)
+        .field("🎯 Streak atual", format!("**{}** rodada(s)", streak), true)
+        .field("💰 Aposta por rodada", format!("**{}** coin(s)", aposta), true)
+        .field("✖️ Multiplicador", format!("**{:.2}x**", multiplier), true)
+        .field("📥 Pagamento desta rodada", format!("**+{}** coin(s)", payout), true)
+        .field("📈 Lucro líquido", format!("**+{}** coin(s)", lucro), true)
+        .field("💳 Saldo atual", format!("**{}** coin(s)", saldo_atual), true)
+        .field("🏧 Saque agora vale", format!("**{}** coin(s)", cashout_now), true)
+        .field("▶️ Próxima jogada", "Escolha **Maior** ou **Menor**, ou **Sacar** para encerrar.", false)
 }
 
 fn build_loss_embed(
     previous_card: Card,
     revealed_card: Card,
     aposta: i64,
+    streak: i64,
     saldo_atual: i64,
 ) -> CreateEmbed {
+    let streak_bonus_lost = if streak > 0 {
+        cashout_bonus(aposta, streak)
+    } else {
+        0
+    };
     CreateEmbed::new()
-        .title("HighLow • Fim de jogo")
+        .title("🔴 HighLow • Fim de jogo")
         .color(Colour::DARK_RED)
         .description(format!(
-            "Carta anterior:\n{}\nNova carta:\n{}\n\nVocê errou a previsão.\nPerda desta rodada: **{}**\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
+            "Carta anterior:\n{}\nNova carta:\n{}\n\n❌ Você errou a previsão e perdeu esta rodada!",
             card_text(previous_card),
             card_text(revealed_card),
-            aposta,
-            saldo_atual
         ))
+        .field("💸 Apostado nesta rodada", format!("**{}** coin(s)", aposta), true)
+        .field("📉 Prejuízo", format!("**-{}** coin(s)", aposta), true)
+        .field("🎯 Streak parada em", format!("**{}** rodada(s)", streak), true)
+        .field("😢 Bônus perdido", format!("**{}** coin(s)** (saque não feito)", streak_bonus_lost), true)
+        .field("💳 Saldo atual", format!("**{}** coin(s)", saldo_atual), true)
+        .field("🔄 Streak", "Resetada para **0**.", true)
 }
 
 fn build_cashout_embed(
@@ -417,9 +464,11 @@ fn build_cashout_embed(
     streak: i64,
     bonus: i64,
     saldo_atual: i64,
+    author_info: &AuthorInfo,
 ) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Saque realizado")
+        .author(author_info.to_embed_author())
         .color(Colour::DARK_GREY)
         .description(format!(
             "Você sacou e encerrou a sessão.\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak no saque: **{}**\nBônus recebido: **{}** coin(s)\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
@@ -437,9 +486,11 @@ fn build_deck_exhausted_embed(
     streak: i64,
     bonus: i64,
     saldo_atual: i64,
+    author_info: &AuthorInfo,
 ) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow • Fim da sessão")
+        .author(author_info.to_embed_author())
         .color(Colour::DARK_ORANGE)
         .description(format!(
             "As cartas válidas acabaram sem reposição, então a sessão foi encerrada automaticamente.\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak final: **{}**\nSaque automático: **{}** coin(s)\nSaldo atual: **{}** coin(s)\nStreak resetada para **0**.",
@@ -451,9 +502,10 @@ fn build_deck_exhausted_embed(
         ))
 }
 
-fn build_error_embed(current_card: Card, aposta: i64, streak: i64, message: &str) -> CreateEmbed {
+fn build_error_embed(current_card: Card, aposta: i64, streak: i64, message: &str, author_info: &AuthorInfo) -> CreateEmbed {
     CreateEmbed::new()
         .title("HighLow")
+        .author(author_info.to_embed_author())
         .color(Colour::DARK_ORANGE)
         .description(format!(
             "{}\n\nCarta atual:\n{}\nAposta por rodada: **{}**\nStreak atual: **{}**",
