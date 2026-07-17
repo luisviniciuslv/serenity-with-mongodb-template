@@ -6,7 +6,7 @@ use poise::serenity_prelude::{
 };
 use poise::CreateReply;
 
-use crate::db::{get_user, update_coins};
+use crate::db::{get_user, record_bet, update_coins};
 use crate::{Context, Error};
 
 // ─── Símbolos ────────────────────────────────────────────────────────────────
@@ -259,6 +259,14 @@ pub async fn niquel(
     } else {
         get_user(&user.id.to_string()).await?.coins
     };
+
+    let _ = record_bet(
+        &user.id.to_string(),
+        "niquel",
+        total_aposta,
+        result.payout > 0 || result.free_spins > 0,
+    )
+    .await?;
 
     let aposta = aposta_por_linha; // alias para o restante do código
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 use poise::serenity_prelude::{Mentionable, ReactionType, User};
 use poise::CreateReply;
 
-use crate::db::{get_user, update_coins};
+use crate::db::{get_user, record_bet, update_coins};
 use crate::{Context, Error};
 
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
@@ -103,6 +103,14 @@ pub async fn duelo(
     update_coins(&desafiante.id.to_string(), -aposta).await?;
     update_coins(&alvo.id.to_string(), -aposta).await?;
     update_coins(&winner.id.to_string(), aposta * 2).await?;
+    let _ = record_bet(
+        &desafiante.id.to_string(),
+        "duelo",
+        aposta,
+        winner.id == desafiante.id,
+    )
+    .await?;
+    let _ = record_bet(&alvo.id.to_string(), "duelo", aposta, winner.id == alvo.id).await?;
     let desafiante_final = get_user(&desafiante.id.to_string()).await?;
     let alvo_final = get_user(&alvo.id.to_string()).await?;
     let vencedor_final = get_user(&winner.id.to_string()).await?;

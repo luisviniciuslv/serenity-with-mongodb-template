@@ -16,6 +16,14 @@ pub struct BusinessCatalogModel {
   pub price: i64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BetHistoryModel {
+  pub minigame: String,
+  pub value: i64,
+  pub result: String,
+  pub datetime: i64,
+}
+
 pub static BUSINESSES: &[BusinessCatalogModel] = &[
   BusinessCatalogModel {
     name: "Mercado",
@@ -42,5 +50,7 @@ pub struct UserModel {
   pub last_reward: i64,
   pub businesses: Vec<BusinessModel>,
   #[serde(default)]
-  pub highlow_streak: i64
+  pub highlow_streak: i64,
+  #[serde(default)]
+  pub bets: Vec<BetHistoryModel>,
 }

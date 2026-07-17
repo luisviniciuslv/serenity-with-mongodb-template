@@ -1,7 +1,7 @@
 use poise::serenity_prelude::{Colour, CreateEmbed};
 use poise::CreateReply;
 
-use crate::db::{get_user, update_coins};
+use crate::db::{get_user, record_bet, update_coins};
 use crate::{Context, Error};
 
 #[poise::command(slash_command, prefix_command, rename = "poi", user_cooldown = 5)]
@@ -114,6 +114,7 @@ async fn run_bet_command(
     let embed = if ganhou {
         let premio = aposta * 2;
         let updated_user = update_coins(&user.id.to_string(), premio).await?;
+        let _ = record_bet(&user.id.to_string(), "par_ou_impar", aposta, true).await?;
         CreateEmbed::new()
             .title("🎲 Par ou Ímpar")
             .thumbnail(&user_image_url)
@@ -126,6 +127,7 @@ async fn run_bet_command(
             .field("Saldo Atual", format!("{} coins", updated_user.coins), true)
     } else {
         let updated_user = get_user(&user.id.to_string()).await?;
+        let _ = record_bet(&user.id.to_string(), "par_ou_impar", aposta, false).await?;
         CreateEmbed::new()
             .title("🎲 Par ou Ímpar")
             .thumbnail(&user_image_url)

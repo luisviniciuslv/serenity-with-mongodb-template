@@ -8,7 +8,7 @@ use poise::serenity_prelude::{
 use poise::CreateReply;
 use rand::seq::SliceRandom;
 
-use crate::db::{get_user, set_highlow_streak, update_coins};
+use crate::db::{get_user, record_bet, set_highlow_streak, update_coins};
 use crate::{Context, Error};
 
 const BTN_HIGH: &str = "highlow_high";
@@ -248,6 +248,7 @@ async fn process_round_win(
 ) -> Result<i64, Error> {
     let next_streak = streak + 1;
     set_highlow_streak(user_id, next_streak).await?;
+    let _ = record_bet(user_id, "highlow", aposta, true).await?;
 
     let multiplier = streak_multiplier(next_streak);
     let payout = ((aposta as f64) * multiplier).floor() as i64;
@@ -281,6 +282,7 @@ async fn process_round_loss(
     aposta: i64,
 ) -> Result<(), Error> {
     set_highlow_streak(user_id, 0).await?;
+    let _ = record_bet(user_id, "highlow", aposta, false).await?;
     let updated_user = get_user(user_id).await?;
 
     respond_with_embed(
@@ -468,15 +470,13 @@ fn shuffled_deck() -> Vec<Card> {
     suits.shuffle(&mut rng);
 
     let mut deck = Vec::with_capacity(52);
-    let mut order = 0;
 
     for suit in suits {
         let mut ranks: Vec<i64> = (1..=13).collect();
         ranks.shuffle(&mut rng);
 
         for rank in ranks {
-            deck.push(Card { rank, suit, order });
-            order += 1;
+            deck.push(Card { rank, suit });
         }
     }
 
@@ -511,7 +511,6 @@ fn card_rank(value: i64) -> &'static str {
 struct Card {
     rank: i64,
     suit: Suit,
-    order: i64,
 }
 
 #[derive(Clone, Copy)]
@@ -539,7 +538,7 @@ impl Suit {
 }
 
 fn compare_cards(left: Card, right: Card) -> Ordering {
-    left.order.cmp(&right.order)
+    left.rank.cmp(&right.rank)
 }
 
 fn card_text(card: Card) -> String {

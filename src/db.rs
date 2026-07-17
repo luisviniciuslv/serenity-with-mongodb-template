@@ -1,4 +1,4 @@
-use crate::model::{UserModel, BUSINESSES};
+use crate::model::{BetHistoryModel, UserModel, BUSINESSES};
 
 use lazy_static::lazy_static;
 use mongodb::bson::{doc, Document};
@@ -65,7 +65,8 @@ pub async fn create_user(user_id: &str) -> Result<UserModel> {
       coins: 100,
       last_reward: unix_time_i64,
       businesses: Vec::new(),
-      highlow_streak: 0
+      highlow_streak: 0,
+      bets: Vec::new(),
     };
 
     let bson_user = to_bson(&user)?; 
@@ -106,6 +107,25 @@ pub async fn set_highlow_streak(user_id: &str, streak: i64) -> Result<UserModel>
   user_collection
     .update_one(doc! {"_id": user_id}, doc! {"$set": doc! {"highlow_streak": streak}})
     .await?;
+  get_user(user_id).await
+}
+
+pub async fn record_bet(user_id: &str, minigame: &str, value: i64, won: bool) -> Result<UserModel> {
+  let user_collection: Collection<Document> = USER_COLLECTION.lock().unwrap().clone().unwrap();
+  let bet = BetHistoryModel {
+    minigame: minigame.to_string(),
+    value,
+    result: if won { "vitoria".to_string() } else { "derrota".to_string() },
+    datetime: get_current_timestamp(),
+  };
+
+  user_collection
+    .update_one(
+      doc! {"_id": user_id},
+      doc! {"$push": doc! {"bets": mongodb::bson::to_document(&bet)?}},
+    )
+    .await?;
+
   get_user(user_id).await
 }
 
