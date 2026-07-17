@@ -271,38 +271,60 @@ fn free_spins_from_scatter(count: usize) -> u32 {
 #[poise::command(slash_command, prefix_command, user_cooldown = 5)]
 pub async fn niquel(
     ctx: Context<'_>,
-    #[description = "Valor TOTAL da aposta (dividido em 20 linhas automaticamente)"] aposta: String,
+    #[description = "Valor TOTAL da aposta (allwin / metade / número)"] aposta: String,
+    #[description = "Quantidade de giros automáticos (1-10, padrão: 1)"] giros: Option<u32>,
 ) -> Result<(), Error> {
     let user = ctx.author().clone();
     let user_db = get_user(&user.id.to_string()).await?;
 
-    // aposta_total = o que o usuário digita; nunca perde mais do que isso
-    let aposta_total = if aposta.to_lowercase() == "allwin" {
+    // ── Valida quantidade de giros ────────────────────────────────────────────
+    let giros: u32 = match giros.unwrap_or(1) {
+        n if n < 1 => {
+            ctx.say("Quantidade de giros mínima é **1**.").await?;
+            return Ok(());
+        }
+        n if n > 10 => {
+            ctx.say("Quantidade máxima de giros é **10**.").await?;
+            return Ok(());
+        }
+        n => n,
+    };
+
+    // ── Resolve valor da aposta ───────────────────────────────────────────────
+    let aposta_bruta = if aposta.to_lowercase() == "allwin" {
         user_db.coins
+    } else if aposta.to_lowercase() == "metade" {
+        user_db.coins / 2
     } else {
         match aposta.parse::<i64>() {
             Ok(val) => val,
             Err(_) => {
-                ctx.say("Aposta inválida. Digite um número ou 'allwin'.")
+                ctx.say("Aposta inválida. Digite um número, 'allwin' ou 'metade'.")
                     .await?;
                 return Ok(());
             }
         }
     };
 
-    if aposta_total <= 0 {
+    if aposta_bruta <= 0 {
         ctx.say("Valor de aposta inválido.").await?;
         return Ok(());
     }
 
-    // Trunca aposta total para múltiplo exato de 20 linhas
-    let aposta_por_linha = (aposta_total / NUM_PAYLINES).max(1);
-    let total_aposta = aposta_por_linha * NUM_PAYLINES;
+    // aposta_por_giro: cada spin custa esse valor (múltiplo de 20 linhas)
+    let aposta_por_giro_raw = aposta_bruta / giros as i64;
+    let aposta_por_linha = (aposta_por_giro_raw / NUM_PAYLINES).max(1);
+    let aposta_por_giro = aposta_por_linha * NUM_PAYLINES;
+    let total_aposta = aposta_por_giro * giros as i64;
 
+    if total_aposta <= 0 {
+        ctx.say("Aposta muito pequena para dividir entre os giros. Tente um valor maior.").await?;
+        return Ok(());
+    }
     if user_db.coins < total_aposta {
         ctx.say(format!(
-            "Você não tem coins suficientes. Aposta total: **{}** coins.",
-            total_aposta
+            "Você não tem coins suficientes. Aposta total: **{}** coins ({} giro(s) × {} coins).",
+            total_aposta, giros, aposta_por_giro
         ))
         .await?;
         return Ok(());
@@ -310,32 +332,27 @@ pub async fn niquel(
 
     let user_image_url = user.face().to_string();
 
-    // Deduz aposta e gira — passa a aposta_total para evaluate_spin
+    // ── Deduz tudo de uma vez ─────────────────────────────────────────────────
     update_coins(&user.id.to_string(), -total_aposta).await?;
-    let grid = spin_grid();
-    let result = evaluate_spin(&grid, total_aposta);
-    let saldo_final = if result.payout > 0 {
-        update_coins(&user.id.to_string(), result.payout)
-            .await?
-            .coins
-    } else {
-        get_user(&user.id.to_string()).await?.coins
-    };
+    let mut saldo_atual = user_db.coins - total_aposta;
 
-    let _ = record_bet(
-        &user.id.to_string(),
-        "niquel",
-        total_aposta,
-        result.payout > 0 || result.free_spins > 0,
-    )
-    .await?;
+    // ── Estrutura de relatório por rodada ─────────────────────────────────────
+    struct RoundReport {
+        spin_num: u32,
+        payout: i64,
+        free_spins: u32,
+        winning_lines: Vec<String>, // resumo de cada linha ganhadora
+    }
+    let mut reports: Vec<RoundReport> = Vec::new();
+    let mut total_payout: i64 = 0;
+    let mut total_free_spins: u32 = 0;
 
-    // Animação de giro (mostra "?" e revela coluna por coluna)
+    // ── Envia mensagem inicial ────────────────────────────────────────────────
     let reply = ctx
         .send(CreateReply {
             embeds: vec![build_spinning_embed(
                 &vec![vec!["?".to_string(); 5]; 3],
-                total_aposta,
+                aposta_por_giro,
                 0,
                 &user.name,
                 &user_image_url,
@@ -343,77 +360,259 @@ pub async fn niquel(
             ..Default::default()
         })
         .await?;
-
     let mut message = reply.message().await?.into_owned();
 
-    for col in 0..5usize {
-        tokio::time::sleep(Duration::from_millis(1100)).await;
-        let partial: Vec<Vec<String>> = (0..3)
-            .map(|row| {
-                (0..5)
-                    .map(|c| {
-                        if c <= col {
-                            grid[row][c].clone()
-                        } else {
-                            "?".to_string()
-                        }
-                    })
-                    .collect()
-            })
-            .collect();
+    // ── Loop de giros ─────────────────────────────────────────────────────────
+    for spin_idx in 0..giros {
+        let spin_num = spin_idx + 1;
+        let grid = spin_grid();
 
-        let _ = message
-            .edit(
-                ctx.serenity_context(),
-                EditMessage::new().embed(build_spinning_embed(
-                    &partial,
-                    total_aposta,
-                    col + 1,
-                    &user.name,
-                    &user_image_url,
-                )),
-            )
-            .await;
+        if giros == 1 {
+            // Giro único: animação coluna por coluna completa
+            for col in 0..5usize {
+                tokio::time::sleep(Duration::from_millis(1100)).await;
+                let partial: Vec<Vec<String>> = (0..3)
+                    .map(|row| {
+                        (0..5)
+                            .map(|c| if c <= col { grid[row][c].clone() } else { "?".to_string() })
+                            .collect()
+                    })
+                    .collect();
+                let _ = message
+                    .edit(
+                        ctx.serenity_context(),
+                        EditMessage::new().embed(build_spinning_embed(
+                            &partial,
+                            aposta_por_giro,
+                            col + 1,
+                            &user.name,
+                            &user_image_url,
+                        )),
+                    )
+                    .await;
+            }
+        } else {
+            // Multi-giro: animação rápida (mostra girando → resultado)
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            let _ = message
+                .edit(
+                    ctx.serenity_context(),
+                    EditMessage::new().embed(
+                        CreateEmbed::new()
+                            .title(format!(
+                                "🎰 Giro {}/{} • {} — Girando...",
+                                spin_num, giros, user.name
+                            ))
+                            .thumbnail(&user_image_url)
+                            .color(Colour::DARK_GOLD)
+                            .description(render_grid(&vec![vec!["?".to_string(); 5]; 3]))
+                            .field("Aposta por Giro", format!("{} coins", aposta_por_giro), true)
+                            .field("Giro", format!("{}/{}", spin_num, giros), true)
+                            .field("💰 Total Ganho", format!("{} coins", total_payout), true)
+                            .field("Saldo Atual", format!("{} coins", saldo_atual), true),
+                    ),
+                )
+                .await;
+            tokio::time::sleep(Duration::from_millis(800)).await;
+        }
+
+        // ── Avalia resultado ──────────────────────────────────────────────────
+        let result = evaluate_spin(&grid, aposta_por_giro);
+        if result.payout > 0 {
+            saldo_atual = update_coins(&user.id.to_string(), result.payout).await?.coins;
+            total_payout += result.payout;
+        }
+        total_free_spins += result.free_spins;
+
+        // Grava aposta no histórico
+        let _ = record_bet(
+            &user.id.to_string(),
+            "niquel",
+            aposta_por_giro,
+            result.payout > 0 || result.free_spins > 0,
+        )
+        .await;
+
+        // ── Monta resumo desta rodada para o relatório ────────────────────────
+        let mut winning_lines: Vec<String> = Vec::new();
+        if result.scatter_count >= 3 {
+            winning_lines.push(format!(
+                "⭐ Scatter×{} = {} coins{}",
+                result.scatter_count,
+                result.scatter_payout,
+                if result.free_spins > 0 { format!(" +{}FS", result.free_spins) } else { String::new() }
+            ));
+        }
+        for (idx, r) in &result.line_results {
+            winning_lines.push(format!("L{} {}×{}({:.1}×)={}c", idx + 1, r.count, r.symbol, r.multiplier, r.payout));
+        }
+        if winning_lines.is_empty() {
+            winning_lines.push("Sem prêmio".to_string());
+        }
+
+        reports.push(RoundReport {
+            spin_num,
+            payout: result.payout,
+            free_spins: result.free_spins,
+            winning_lines,
+        });
+
+        // ── Mostra resultado desta rodada (em multi-giro: breve; em único: final) ──
+        let result_embed = build_result_embed(
+            &result,
+            aposta_por_giro,
+            saldo_atual,
+            &user.name,
+            &user_image_url,
+            false,
+        );
+
+        if giros == 1 {
+            // Giro único: exibe resultado diretamente
+            let has_free_spins = result.free_spins > 0;
+            let components = if has_free_spins {
+                vec![CreateActionRow::Buttons(vec![CreateButton::new(BTN_FREE_SPIN)
+                    .label(format!("🎁 Usar {} Free Spins!", result.free_spins))
+                    .style(ButtonStyle::Success)])]
+            } else {
+                vec![]
+            };
+
+            let _ = message
+                .edit(
+                    ctx.serenity_context(),
+                    EditMessage::new().embed(result_embed.clone()).components(components),
+                )
+                .await;
+
+            if has_free_spins {
+                let interaction = message
+                    .await_component_interaction(ctx.serenity_context())
+                    .author_id(user.id)
+                    .timeout(Duration::from_secs(90))
+                    .await;
+
+                if let Some(mci) = interaction {
+                    mci.create_response(
+                        ctx.serenity_context(),
+                        CreateInteractionResponse::UpdateMessage(
+                            CreateInteractionResponseMessage::new()
+                                .embed(result_embed)
+                                .components(vec![]),
+                        ),
+                    )
+                    .await?;
+
+                    run_free_spins(
+                        &ctx,
+                        &mut message,
+                        aposta_por_giro,
+                        result.free_spins,
+                        &user.id.to_string(),
+                        &user.name,
+                        &user_image_url,
+                    )
+                    .await?;
+                } else {
+                    let _ = message
+                        .edit(
+                            ctx.serenity_context(),
+                            EditMessage::new().embed(result_embed).components(vec![]),
+                        )
+                        .await;
+                }
+            }
+
+            return Ok(());
+        } else {
+            // Multi-giro: mostra resultado brevemente antes do próximo spin
+            let _ = message
+                .edit(
+                    ctx.serenity_context(),
+                    EditMessage::new().embed(
+                        result_embed
+                            .title(format!("🎰 Giro {}/{} • Resultado ({})", spin_num, giros, user.name))
+                    ),
+                )
+                .await;
+
+            if spin_idx < giros - 1 {
+                tokio::time::sleep(Duration::from_millis(1800)).await;
+            }
+        }
     }
 
-    // Resultado final
-    let has_free_spins = result.free_spins > 0;
-    let result_embed = build_result_embed(
-        &result,
-        total_aposta,
-        saldo_final,
-        &user.name,
-        &user_image_url,
-        false,
-    );
+    // ── Relatório final (multi-giro) ──────────────────────────────────────────
+    let lucro_liquido = total_payout - total_aposta;
+    let status_final = if lucro_liquido > 0 {
+        format!("🎉 Lucro de **{}** coins!", lucro_liquido)
+    } else if lucro_liquido == 0 {
+        "Empatou — sem lucro nem prejuízo.".to_string()
+    } else {
+        format!("😔 Prejuízo de **{}** coins.", -lucro_liquido)
+    };
 
-    let components = if has_free_spins {
-        vec![CreateActionRow::Buttons(vec![CreateButton::new(
-            BTN_FREE_SPIN,
-        )
-        .label(format!("🎁 Usar {} Free Spins!", result.free_spins))
-        .style(ButtonStyle::Success)])]
+    // Monta relatório compacto por rodada
+    let mut report_text = String::new();
+    for r in &reports {
+        let lines_str = r.winning_lines.join(" | ");
+        let payout_str = if r.payout > 0 {
+            format!("+{} coins", r.payout)
+        } else {
+            "0 coins".to_string()
+        };
+        let fs_str = if r.free_spins > 0 {
+            format!(" 🎁+{}FS", r.free_spins)
+        } else {
+            String::new()
+        };
+        report_text.push_str(&format!(
+            "**Spin {}**: {} → **{}**{}\n",
+            r.spin_num, lines_str, payout_str, fs_str
+        ));
+    }
+    // Trunca se ultrapassar limite do embed
+    if report_text.len() > 1020 {
+        report_text.truncate(1017);
+        report_text.push_str("...");
+    }
+
+    let final_components = if total_free_spins > 0 {
+        vec![CreateActionRow::Buttons(vec![CreateButton::new(BTN_FREE_SPIN)
+            .label(format!("🎁 Usar {} Free Spins acumulados!", total_free_spins))
+            .style(ButtonStyle::Success)])]
     } else {
         vec![]
     };
+
+    let final_embed = CreateEmbed::new()
+        .title(format!("🎰 {} Giros Concluídos! • {}", giros, user.name))
+        .thumbnail(&user_image_url)
+        .color(if lucro_liquido >= 0 { Colour::DARK_GREEN } else { Colour::DARK_RED })
+        .field("Giros Jogados", giros.to_string(), true)
+        .field("Aposta por Giro", format!("{} coins", aposta_por_giro), true)
+        .field("Aposta Total", format!("{} coins", total_aposta), true)
+        .field("💰 Total Ganho", format!("{} coins", total_payout), true)
+        .field("Saldo Final", format!("{} coins", saldo_atual), true)
+        .field("🎁 Free Spins Acumulados", total_free_spins.to_string(), true)
+        .field("Resultado", status_final, false)
+        .field("📋 Relatório por Rodada", report_text, false);
 
     let _ = message
         .edit(
             ctx.serenity_context(),
             EditMessage::new()
-                .embed(result_embed.clone())
-                .components(components),
+                .embed(final_embed.clone())
+                .components(final_components),
         )
         .await;
 
-    // Aguarda clique no botão de free spins (90s de timeout)
-    if has_free_spins {
-        let free_spins_total = result.free_spins;
-
+    // Aguarda clique no botão de free spins (120s de timeout para multi-giro)
+    if total_free_spins > 0 {
         let interaction = message
             .await_component_interaction(ctx.serenity_context())
             .author_id(user.id)
-            .timeout(Duration::from_secs(90))
+            .timeout(Duration::from_secs(120))
             .await;
 
         if let Some(mci) = interaction {
@@ -421,7 +620,7 @@ pub async fn niquel(
                 ctx.serenity_context(),
                 CreateInteractionResponse::UpdateMessage(
                     CreateInteractionResponseMessage::new()
-                        .embed(result_embed)
+                        .embed(final_embed)
                         .components(vec![]),
                 ),
             )
@@ -430,19 +629,18 @@ pub async fn niquel(
             run_free_spins(
                 &ctx,
                 &mut message,
-                total_aposta,
-                free_spins_total,
+                aposta_por_giro,
+                total_free_spins,
                 &user.id.to_string(),
                 &user.name,
                 &user_image_url,
             )
             .await?;
         } else {
-            // Timeout: remove o botão
             let _ = message
                 .edit(
                     ctx.serenity_context(),
-                    EditMessage::new().embed(result_embed).components(vec![]),
+                    EditMessage::new().embed(final_embed).components(vec![]),
                 )
                 .await;
         }
@@ -492,7 +690,11 @@ async fn run_free_spins(
                         .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
                         .field("Spins Restantes", format!("{}", remaining_spins), true)
                         .field("Saldo Atual", format!("{} coins", saldo_atual), true)
-                        .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
+                        .field(
+                            "💰 Total Ganho (sessão)",
+                            format!("{} coins", total_ganho),
+                            true,
+                        )
                         .field("Status", "🎲 Girando... (GRÁTIS!)", false),
                 ),
             )
@@ -531,8 +733,16 @@ async fn run_free_spins(
                             .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
                             .field("Spins Restantes", format!("{}", remaining_spins), true)
                             .field("Saldo Atual", format!("{} coins", saldo_atual), true)
-                            .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
-                            .field("Status", format!("Revelando coluna {}/5...", col + 1), false),
+                            .field(
+                                "💰 Total Ganho (sessão)",
+                                format!("{} coins", total_ganho),
+                                true,
+                            )
+                            .field(
+                                "Status",
+                                format!("Revelando coluna {}/5...", col + 1),
+                                false,
+                            ),
                     ),
                 )
                 .await;
@@ -572,7 +782,11 @@ async fn run_free_spins(
             for (idx, r) in &result.line_results {
                 detalhes.push_str(&format!(
                     "**L{}**: {}×{} ({:.2}×) = **{}** coins\n",
-                    idx + 1, r.count, r.symbol, r.multiplier, r.payout
+                    idx + 1,
+                    r.count,
+                    r.symbol,
+                    r.multiplier,
+                    r.payout
                 ));
             }
         }
@@ -594,13 +808,21 @@ async fn run_free_spins(
                 spin_num, total_spins_awarded, user_name, retrigger_tag
             ))
             .thumbnail(user_image_url)
-            .color(if won { Colour::DARK_GREEN } else { Colour::DARK_GOLD })
+            .color(if won {
+                Colour::DARK_GREEN
+            } else {
+                Colour::DARK_GOLD
+            })
             .description(render_grid(&result.grid))
             .field("Aposta da Rodada", format!("{} coins", total_aposta), true)
             .field("Pagamento", format!("{} coins", result.payout), true)
             .field("Saldo Atual", format!("{} coins", saldo_atual), true)
             .field("Spins Restantes", format!("{}", remaining_spins), true)
-            .field("💰 Total Ganho (sessão)", format!("{} coins", total_ganho), true)
+            .field(
+                "💰 Total Ganho (sessão)",
+                format!("{} coins", total_ganho),
+                true,
+            )
             .field("Status", spin_status, false)
             .field("Detalhes", detalhes, false);
 
@@ -626,13 +848,21 @@ async fn run_free_spins(
     let summary_embed = CreateEmbed::new()
         .title(format!("🎰 Free Spins Concluídos! • {}", user_name))
         .thumbnail(user_image_url)
-        .color(if total_ganho > 0 { Colour::DARK_GREEN } else { Colour::DARK_RED })
+        .color(if total_ganho > 0 {
+            Colour::DARK_GREEN
+        } else {
+            Colour::DARK_RED
+        })
         .description(format!(
             "Sessão de free spins encerrada! Você jogou **{}** spin(s) grátis.",
             spin_num
         ))
         .field("Free Spins Jogados", spin_num.to_string(), true)
-        .field("Total Spins Concedidos", total_spins_awarded.to_string(), true)
+        .field(
+            "Total Spins Concedidos",
+            total_spins_awarded.to_string(),
+            true,
+        )
         .field("Aposta por Spin", format!("{} coins", total_aposta), true)
         .field("💰 Total Ganho", format!("{} coins", total_ganho), true)
         .field("Saldo Final", format!("{} coins", saldo_atual), true)
